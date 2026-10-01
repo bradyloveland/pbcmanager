@@ -361,6 +361,12 @@ func (h *Host) env(stdin io.Reader, stdout, stderr io.Writer) *runner.Env {
 			return h.systemctl(args)
 		case "getent":
 			return "pbcm:x:999:999::/var/lib/pbcm:/bin/sh\n", nil
+		case "systemd-run":
+			// Measuring runs in the background on a real client; here it's
+			// done before systemd-run returns.
+			if n := len(args); n >= 2 && args[n-2] == "measure-run" {
+				return "", runner.MeasureRun(h.env(nil, io.Discard, io.Discard), args[n-1])
+			}
 		}
 		return "", nil
 	}

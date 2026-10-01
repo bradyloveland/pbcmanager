@@ -288,11 +288,22 @@ type Run struct {
 	LogSize         int64  `json:"log_size"`
 }
 
+// FolderSize is a folder's measured size on a client.
+type FolderSize struct {
+	Path      string  `json:"path"`
+	Bytes     *int64  `json:"bytes"`
+	Error     string  `json:"error"`
+	Measured  int64   `json:"measured"`
+	Seconds   float64 `json:"seconds"`
+	Measuring bool    `json:"measuring"`
+}
+
 // Status is a client's answer to "what happened since …".
 type Status struct {
-	Runs    []Run  `json:"runs"`
-	Applied string `json:"applied"` // hash of the bundle it has
-	Now     int64  `json:"now"`
+	Runs    []Run        `json:"runs"`
+	Applied string       `json:"applied"` // hash of the bundle it has
+	Now     int64        `json:"now"`
+	Sizes   []FolderSize `json:"sizes"`
 }
 
 // LogChunk is part of a run's log.

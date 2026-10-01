@@ -22,6 +22,7 @@ import (
 	"github.com/bradyloveland/pbcmanager/internal/alerts"
 	"github.com/bradyloveland/pbcmanager/internal/auth"
 	"github.com/bradyloveland/pbcmanager/internal/backups"
+	"github.com/bradyloveland/pbcmanager/internal/bundle"
 	"github.com/bradyloveland/pbcmanager/internal/clients"
 	"github.com/bradyloveland/pbcmanager/internal/config"
 	"github.com/bradyloveland/pbcmanager/internal/sshx"
@@ -61,6 +62,7 @@ type Server struct {
 	clients  *clients.Manager
 	pbs      *backups.PBS
 	notifier *alerts.Notifier
+	sizes    *backups.Tracker
 	pollStop context.CancelFunc
 
 	mu         sync.Mutex
@@ -119,8 +121,22 @@ func New(opts Options) (*Server, error) {
 		LogPath: func(clientID, runID string) string {
 			return filepath.Join(opts.DataDir, "logs", clientID, runID+".log")
 		}}
-	s.clients.Sync.OnFinished = s.notifier.RunFinished
 	s.clients.Sync.OnReachable = s.notifier.ClientReachable
+	s.clients.Sync.FolderEvery = func() time.Duration { return time.Duration(s.settingInt("sizes.folder_hours")) * time.Hour }
+	s.sizes = &backups.Tracker{Store: opts.Store, PBS: s.pbs,
+		SpaceEvery:  func() time.Duration { return time.Duration(s.settingInt("sizes.space_minutes")) * time.Minute },
+		BackupEvery: func() time.Duration { return time.Duration(s.settingInt("sizes.backup_minutes")) * time.Minute },
+		OnSpace: func(d *store.Destination, sp *backups.Space) {
+			if sp.Used != nil && sp.Total != nil {
+				sp.FullSince = s.notifier.Space(d, *sp.Used, *sp.Total, sp.FullSince)
+			}
+		}}
+	s.clients.Sync.OnFinished = func(c *store.Client, r *store.Run) {
+		s.notifier.RunFinished(c, r)
+		if r.Status == bundle.Success {
+			s.sizes.Request("backup:" + r.JobID)
+		}
+	}
 	s.mux = http.NewServeMux()
 	s.routes()
 	s.http = &http.Server{
@@ -166,6 +182,7 @@ func (s *Server) Start() error {
 	s.pollStop = cancel
 	go s.clients.Poll(ctx)
 	go s.notifier.Loop(ctx)
+	go s.sizes.Loop(ctx)
 	return nil
 }
 

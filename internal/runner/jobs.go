@@ -620,7 +620,7 @@ func StatusSince(env *Env, since int64) error {
 	if err != nil {
 		return err
 	}
-	out := bundle.Status{Runs: []bundle.Run{}, Applied: st.Hash, Now: env.now().Unix()}
+	out := bundle.Status{Runs: []bundle.Run{}, Applied: st.Hash, Now: env.now().Unix(), Sizes: env.sizes()}
 	active := map[string]bool{}
 	for _, id := range env.runIDs() {
 		r, err := env.loadRun(id)

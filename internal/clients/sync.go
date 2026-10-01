@@ -35,6 +35,9 @@ type SyncConfig struct {
 	// OnReachable is called when a client that couldn't be reached answers
 	// again; since is when contact was lost.
 	OnReachable func(c *store.Client, since int64)
+	// FolderEvery is how often each backed-up folder's size is measured
+	// again (0 for never, except when asked).
+	FolderEvery func() time.Duration
 }
 
 // backOnline clears a client's outage, telling the alerts hook. The caller
@@ -130,6 +133,7 @@ func (m *Manager) applyLocked(ctx context.Context, clientID string) error {
 	}
 	c.AppliedHash, c.ApplyError, c.LastContact = res.Applied, "", time.Now().Unix()
 	slog.Info("settings sent to client", "client", c.Name, "jobs", len(b.Jobs))
+	m.wake(c.ID) // check it again soon, which measures any new folders
 	return m.store.SaveClient(c)
 }
 
@@ -303,6 +307,7 @@ func (m *Manager) SyncClient(ctx context.Context, clientID string) ([]*store.Run
 			slog.Warn("couldn't send settings to client", "client", c.Name, "err", err)
 		}
 	}
+	m.syncSizes(ctx, c, st.Sizes)
 	if m.Sync.OnFinished != nil {
 		for _, r := range finished {
 			m.Sync.OnFinished(c, r)
@@ -398,7 +403,7 @@ func (m *Manager) Poll(ctx context.Context) {
 				_, err := m.SyncClient(cctx, c.ID)
 				every := m.Sync.IdleEvery
 				if err == nil {
-					if active, _ := m.store.ListRuns(store.RunFilter{ClientID: c.ID, Statuses: []string{bundle.Running}, Limit: 1}); len(active) > 0 {
+					if active, _ := m.store.ListRuns(store.RunFilter{ClientID: c.ID, Statuses: []string{bundle.Running}, Limit: 1}); len(active) > 0 || m.isMeasuring(c.ID) {
 						every = m.Sync.ActiveEvery
 					}
 				}
@@ -418,4 +423,136 @@ func (m *Manager) Poll(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// syncSizes saves the folder sizes a client reported and asks it to measure
+// the job folders that are new or out of date.
+func (m *Manager) syncSizes(ctx context.Context, c *store.Client, sizes []bundle.FolderSize) {
+	have := map[string]bundle.FolderSize{}
+	measuring := false
+	for _, f := range sizes {
+		have[f.Path] = f
+		measuring = measuring || f.Measuring
+		if err := m.store.PutSize(backups.SizeFolder, backups.FolderKey(c.ID, f.Path), f); err != nil {
+			slog.Error("saving folder size", "err", err)
+		}
+	}
+	m.setMeasuring(c.ID, measuring)
+	if m.Sync.FolderEvery == nil {
+		return
+	}
+	every := m.Sync.FolderEvery()
+	if every <= 0 {
+		return
+	}
+	jobs, err := m.store.ListJobs(c.ID)
+	if err != nil {
+		return
+	}
+	now := time.Now()
+	var due []string
+	seen := map[string]bool{}
+	for _, j := range jobs {
+		for _, sh := range j.Shares {
+			p := sh.Path
+			if seen[p] {
+				continue
+			}
+			seen[p] = true
+			f, ok := have[p]
+			if ok && (f.Measuring || now.Sub(time.Unix(f.Measured, 0)) < every) {
+				continue
+			}
+			if m.askedRecently(c.ID+":"+p, now) {
+				continue
+			}
+			due = append(due, p)
+		}
+	}
+	if len(due) > 0 {
+		if err := m.measure(ctx, c, due); err != nil {
+			slog.Debug("couldn't start measuring folders", "client", c.Name, "err", err)
+		} else {
+			m.setMeasuring(c.ID, true)
+			m.wake(c.ID)
+		}
+	}
+}
+
+// askedRecently stops the server asking for the same folder over and over
+// when the client can't start measuring it.
+func (m *Manager) askedRecently(key string, now time.Time) bool {
+	m.busyMu.Lock()
+	defer m.busyMu.Unlock()
+	if m.measureAsked == nil {
+		m.measureAsked = map[string]time.Time{}
+	}
+	if t, ok := m.measureAsked[key]; ok && now.Sub(t) < time.Hour {
+		return true
+	}
+	m.measureAsked[key] = now
+	return false
+}
+
+func (m *Manager) measure(ctx context.Context, c *store.Client, paths []string) error {
+	_, err := m.runnerCommand(ctx, c, append([]string{"measure"}, paths...)...)
+	if err != nil && strings.Contains(err.Error(), `unknown command "measure"`) {
+		return &InputError{c.Name + " has an older pbcm-runner that can't measure folders. Use Repair on the client to update it."}
+	}
+	return err
+}
+
+// MeasureFolders asks a client to measure its job folders again now (all of
+// them, or only jobID's), then collects what's finished.
+func (m *Manager) MeasureFolders(ctx context.Context, clientID, jobID string) error {
+	c, err := m.store.GetClient(clientID)
+	if err != nil {
+		return err
+	}
+	if c.Status != store.ClientReady {
+		return &InputError{c.Name + " isn't ready, so its folders can't be measured right now."}
+	}
+	jobs, err := m.store.ListJobs(c.ID)
+	if err != nil {
+		return err
+	}
+	var paths []string
+	seen := map[string]bool{}
+	for _, j := range jobs {
+		if jobID != "" && j.ID != jobID {
+			continue
+		}
+		for _, sh := range j.Shares {
+			if !seen[sh.Path] {
+				seen[sh.Path] = true
+				paths = append(paths, sh.Path)
+			}
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	if err := m.measure(ctx, c, paths); err != nil {
+		return err
+	}
+	m.setMeasuring(c.ID, true)
+	m.wake(c.ID)
+	return nil
+}
+
+// A client measuring folders is checked as often as one running a backup,
+// so the sizes show up soon after they're done.
+func (m *Manager) setMeasuring(clientID string, on bool) {
+	m.busyMu.Lock()
+	defer m.busyMu.Unlock()
+	if m.measuring == nil {
+		m.measuring = map[string]bool{}
+	}
+	m.measuring[clientID] = on
+}
+
+func (m *Manager) isMeasuring(clientID string) bool {
+	m.busyMu.Lock()
+	defer m.busyMu.Unlock()
+	return m.measuring[clientID]
 }

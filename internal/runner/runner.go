@@ -131,6 +131,16 @@ func Dispatch(env *Env, args []string) error {
 		return Uninstall(env, keep)
 	case "apply":
 		return Apply(env, env.Stdin)
+	case "measure":
+		if err := measureUsage(args); err != nil {
+			return err
+		}
+		return Measure(env, args[1:])
+	case "measure-run":
+		if err := measureUsage(args); err != nil {
+			return err
+		}
+		return MeasureRun(env, args[1])
 	case "run":
 		if len(args) < 2 {
 			return &UsageError{"run needs a job ID"}

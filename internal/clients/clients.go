@@ -44,6 +44,9 @@ type Manager struct {
 	busy     map[string]bool
 	syncMus  map[string]*sync.Mutex
 	nextSync map[string]time.Time
+	// measureAsked is when the server last asked for each folder ("client:path").
+	measureAsked map[string]time.Time
+	measuring    map[string]bool
 
 	// Sync configures keeping clients in step (see sync.go).
 	Sync SyncConfig
