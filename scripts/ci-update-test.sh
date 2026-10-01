@@ -17,7 +17,8 @@ PBCM_SIGNING_KEY="$(sed -n 's/^private: //p' <<<"$keys")"
 key_flag="-X github.com/bradyloveland/pbcmanager/internal/release.ExtraKey=$pub"
 
 build() { # version out-dir [extra ldflags]
-  make dist VERSION="$1" EXTRA_LDFLAGS="$key_flag ${3:-}" >/dev/null
+  make dist VERSION="$1" EXTRA_LDFLAGS="$key_flag ${3:-}" >/dev/null || fail "building $1 failed"
+  mkdir -p "$(dirname "$2")"
   rm -rf "$2" && mv dist "$2"
 }
 say "Building three versions"
