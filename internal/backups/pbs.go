@@ -25,7 +25,9 @@ type PBS struct {
 }
 
 // ErrNoClient means the server has no proxmox-backup-client.
-var ErrNoClient = errors.New("proxmox-backup-client isn't installed on this server, so it can't ask PBS anything. Re-run the server's installer, or install the proxmox-backup-client package")
+var ErrNoClient = errors.New("this server doesn't have proxmox-backup-client, so it can't contact PBS to test the connection or list snapshots. " +
+	"You can still save the destination, and backups aren't affected: they run on the clients. " +
+	"To fix this, re-run the server's installer or install the proxmox-backup-client package")
 
 func (p *PBS) bin() (string, error) {
 	bin := p.Bin
