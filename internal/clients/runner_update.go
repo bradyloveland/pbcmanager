@@ -78,12 +78,7 @@ func (m *Manager) RunnerState(clientID string) string {
 
 // syncRunner records the client's runner and sends this server's if it differs.
 func (m *Manager) syncRunner(ctx context.Context, c *store.Client, st *bundle.Status) {
-	m.busyMu.Lock()
-	if m.runnerHashes == nil {
-		m.runnerHashes, m.runnerUpdating = map[string]string{}, map[string]bool{}
-	}
-	m.runnerHashes[c.ID] = st.Runner
-	m.busyMu.Unlock()
+	m.noteRunner(c.ID, st.Runner)
 	own := m.ownRunner()
 	if st.Runner == "" || own.hash == "" || st.Runner == own.hash || !own.signed {
 		return
@@ -111,6 +106,16 @@ func (m *Manager) syncRunner(ctx context.Context, c *store.Client, st *bundle.St
 		}
 		slog.Info("updated pbcm-runner on client", "client", c.Name, "version", res.Version)
 	}
+}
+
+// noteRunner records which pbcm-runner a client has.
+func (m *Manager) noteRunner(id, hash string) {
+	m.busyMu.Lock()
+	defer m.busyMu.Unlock()
+	if m.runnerHashes == nil {
+		m.runnerHashes, m.runnerUpdating = map[string]string{}, map[string]bool{}
+	}
+	m.runnerHashes[id] = hash
 }
 
 func (m *Manager) setRunnerUpdating(id string, on bool) {

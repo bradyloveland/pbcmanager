@@ -515,32 +515,44 @@ func TestRunnerIsUpdatedFromASignedRelease(t *testing.T) {
 	if !v.OK {
 		t.Fatalf("setup: %+v", v)
 	}
-	h.m.SyncClient(ctx, c.ID)
 	if s := h.m.RunnerState(c.ID); s != RunnerCurrent {
-		t.Fatalf("after setup the runner matches: %s", s)
+		t.Fatalf("right after setup the runner matches: %s", s)
+	}
+	onClient := func() string { b, _ := os.ReadFile(h.host.Path(runner.Path)); return string(b) }
+	serverHas := func(b string) {
+		os.WriteFile(h.m.runnerPath, []byte(b), 0o755)
+		h.m.runnerCache = nil
+		delete(h.m.measureAsked, "runner:"+c.ID)
 	}
 
-	// The server is updated to a new release; an unsigned copy can't be pushed.
-	newRunner := []byte("RUNNER-BINARY-2")
-	os.WriteFile(h.m.runnerPath, newRunner, 0o755)
-	h.m.runnerCache = nil
+	// The server gets a new runner but isn't a signed release: nothing is sent.
+	serverHas("RUNNER-BINARY-2")
 	h.m.SyncClient(ctx, c.ID)
-	if s := h.m.RunnerState(c.ID); s != RunnerRepair {
-		t.Fatalf("unsigned server runner: %s", s)
+	if s := h.m.RunnerState(c.ID); s != RunnerRepair || onClient() != "RUNNER-BINARY" {
+		t.Fatalf("unsigned server runner: %s, client has %q", s, onClient())
 	}
-	if b, _ := os.ReadFile(h.host.Path(runner.Path)); string(b) != "RUNNER-BINARY" {
-		t.Fatal("an unsigned runner must not be sent")
+	// Repair installs it, and that shows at once rather than at the next check-in.
+	task, err := h.m.Repair(c.ID, Login{User: "root", Password: rootPW}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := wait(t, task); !v.OK {
+		t.Fatalf("repair: %+v", v)
+	}
+	if s := h.m.RunnerState(c.ID); s != RunnerCurrent || onClient() != "RUNNER-BINARY-2" {
+		t.Fatalf("right after Repair: %s, client has %q", s, onClient())
 	}
 
-	man := (&release.Manifest{Version: "2.1.0", Arch: "amd64", Files: map[string]string{"pbcm-runner": release.Hash(newRunner)}}).Encode()
+	// A signed release is sent at the next check-in.
+	serverHas("RUNNER-BINARY-3")
+	man := (&release.Manifest{Version: "2.1.0", Arch: "amd64", Files: map[string]string{"pbcm-runner": release.Hash([]byte("RUNNER-BINARY-3"))}}).Encode()
 	dir := filepath.Dir(h.m.runnerPath)
 	os.WriteFile(filepath.Join(dir, "MANIFEST"), man, 0o644)
 	os.WriteFile(filepath.Join(dir, "MANIFEST.sig"), release.Sign("test", priv, man), 0o644)
 	h.m.runnerCache = nil
-	delete(h.m.measureAsked, "runner:"+c.ID)
 	h.m.SyncClient(ctx, c.ID)
-	if b, _ := os.ReadFile(h.host.Path(runner.Path)); !bytes.Equal(b, newRunner) {
-		t.Fatalf("the signed runner should be on the client: %q", b)
+	if onClient() != "RUNNER-BINARY-3" {
+		t.Fatalf("the signed runner should be on the client: %q", onClient())
 	}
 	if s := h.m.RunnerState(c.ID); s != RunnerCurrent {
 		t.Fatalf("after the update: %s", s)

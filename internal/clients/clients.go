@@ -431,6 +431,9 @@ func (m *Manager) refresh(ctx context.Context, c *store.Client) error {
 	c.OSID, c.OSPretty, c.OSCodename, c.Arch = info.OSID, info.OSPretty, info.OSCodename, info.Arch
 	c.Hostname, c.SystemdVersion, c.ClientVersion, c.RunnerVersion = info.Hostname, info.SystemdVersion, info.ClientVersion, info.RunnerVersion
 	c.ServerHere, c.LastContact, c.Timezone = info.ServerHere, time.Now().Unix(), info.Timezone
+	if info.RunnerHash != "" {
+		m.noteRunner(c.ID, info.RunnerHash) // so a Repair shows up straight away
+	}
 	c.Status, c.StatusDetail, c.OfferedKey = store.ClientReady, "", ""
 	m.backOnline(c)
 	if info.ClientVersion == "" {
