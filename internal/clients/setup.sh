@@ -109,6 +109,67 @@ chmod 600 "$AK.new"
 mv -f "$AK.new" "$AK"
 step "The $ACCOUNT account signs in only with this server's key and can only run pbcm-runner"
 
+# ---- SSH access ---------------------------------------------------------------
+# Some systems only let certain groups or users sign in over SSH. OpenMediaVault,
+# for one, has "AllowGroups root _ssh". sshd -T shows the settings that apply
+# to the pbcm account. Joining an allowed group is safe: the account can still
+# only sign in with the server's key and run pbcm-runner. sshd_config itself
+# is never edited.
+SSHD="$(command -v sshd 2>/dev/null || echo /usr/sbin/sshd)"
+if [ -x "$SSHD" ] && SSHD_CONF="$("$SSHD" -T -C "user=$ACCOUNT,host=localhost,addr=127.0.0.1" 2>/dev/null)"; then
+  # The values of a setting; sshd -T may print one line per value.
+  sshd_values() { printf '%s\n' "$SSHD_CONF" | awk -v k="$1" 'tolower($1) == k { for (i = 2; i <= NF; i++) print $i }'; }
+  # matches NAME PATTERN...: sshd's pattern rules, without negation.
+  matches() {
+    local name="$1" pat
+    shift
+    for pat in "$@"; do
+      pat="${pat%%@*}"
+      # shellcheck disable=SC2053 # the pattern is meant to be a glob
+      [[ "$pat" != !* && "$name" == $pat ]] && return 0
+    done
+    return 1
+  }
+  mapfile -t ALLOW_GROUPS < <(sshd_values allowgroups)
+  mapfile -t ALLOW_USERS < <(sshd_values allowusers)
+  mapfile -t DENY_GROUPS < <(sshd_values denygroups)
+  mapfile -t DENY_USERS < <(sshd_values denyusers)
+  if [ "${#DENY_USERS[@]}" -gt 0 ] && matches "$ACCOUNT" "${DENY_USERS[@]}"; then
+    step "WARNING: this machine's SSH settings deny the $ACCOUNT account (DenyUsers ${DENY_USERS[*]}). Remove it from DenyUsers in /etc/ssh/sshd_config, run \"systemctl reload ssh\", then use Repair."
+  fi
+  if [ "${#ALLOW_GROUPS[@]}" -gt 0 ]; then
+    in_allowed=0
+    for g in $(id -nG "$ACCOUNT"); do
+      matches "$g" "${ALLOW_GROUPS[@]}" && in_allowed=1
+    done
+    if [ "$in_allowed" -eq 0 ]; then
+      chosen=""
+      for g in "${ALLOW_GROUPS[@]}"; do
+        # A plain group name that exists, and never one that grants admin
+        # rights (that would let the account get round its sudo rule).
+        case "$g" in *[*?!]*|root|sudo|wheel|admin|adm|staff|docker|lxd|incus|libvirt|disk|shadow|kvm) continue ;; esac
+        getent group "$g" >/dev/null 2>&1 && { chosen="$g"; break; }
+      done
+      if [ -n "$chosen" ]; then
+        usermod -aG "$chosen" "$ACCOUNT"
+        step "Added $ACCOUNT to the $chosen group, which this machine's SSH settings allow to sign in (AllowGroups ${ALLOW_GROUPS[*]})"
+      else
+        step "WARNING: this machine's SSH settings only allow the groups ${ALLOW_GROUPS[*]} to sign in, and none of them suits the $ACCOUNT account. Create a group for it, add it to AllowGroups in /etc/ssh/sshd_config, run \"usermod -aG <group> $ACCOUNT\" and \"systemctl reload ssh\", then use Repair."
+      fi
+    fi
+  fi
+  if [ "${#ALLOW_USERS[@]}" -gt 0 ] && ! matches "$ACCOUNT" "${ALLOW_USERS[@]}"; then
+    step "WARNING: this machine's SSH settings only allow certain users to sign in (AllowUsers ${ALLOW_USERS[*]}). Add $ACCOUNT to the AllowUsers line in /etc/ssh/sshd_config, run \"systemctl reload ssh\", then use Repair."
+  fi
+  if [ "${#DENY_GROUPS[@]}" -gt 0 ]; then
+    for g in $(id -nG "$ACCOUNT"); do
+      if matches "$g" "${DENY_GROUPS[@]}"; then
+        step "WARNING: the $ACCOUNT account is in the $g group, which this machine's SSH settings deny (DenyGroups ${DENY_GROUPS[*]})."
+      fi
+    done
+  fi
+fi
+
 # ---- pbcm-runner and its sudo rule --------------------------------------------
 install -d -o root -g root -m 755 "$(dirname "$RUNNER")"
 install -o root -g root -m 755 "$DIR/pbcm-runner" "$RUNNER"

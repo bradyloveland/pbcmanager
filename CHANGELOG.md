@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Adding an OpenMediaVault client failed after setup** because OMV only lets the `_ssh` group sign in over SSH (`AllowGroups root _ssh`). Setup now adds the `pbcm` account to an allowed group when sshd limits sign-ins by group. It never chooses one that grants admin rights, such as `sudo` or `docker`. When the limit is by user (`AllowUsers`) or a `Deny…` rule, setup leaves `sshd_config` alone and says exactly what to change. ([#9](https://github.com/bradyloveland/pbcmanager/issues/9))
+- When the server can't sign in as `pbcm` after setup, the message now says what to do, including the OpenMediaVault command, without a doubled full stop.
+
 ## [2.0.0] - 2026-10-01
 
 Version 2: a rewrite in Go, renamed PBC Manager. One central server now manages backups on many clients over SSH; each client runs its own schedules and backs up straight to Proxmox Backup Server. To move from 1.x, see docs/guide/moving-from-1x.md.

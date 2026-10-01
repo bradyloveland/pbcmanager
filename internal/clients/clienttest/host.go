@@ -69,6 +69,9 @@ type Host struct {
 	files    map[string][]byte
 	rootKey  ssh.PublicKey
 	failWith string
+	// refusePbcm makes sshd turn the pbcm account away, as OpenMediaVault's
+	// "AllowGroups root _ssh" does for an account outside those groups.
+	refusePbcm bool
 	active   map[string]chan struct{}
 	runs     sync.WaitGroup
 	client   string
@@ -148,6 +151,13 @@ func (h *Host) FailSetupWith(msg string) {
 	h.failWith = msg
 }
 
+// RefusePbcm makes the SSH server refuse every sign-in as pbcm.
+func (h *Host) RefusePbcm(on bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.refusePbcm = on
+}
+
 // Path maps a client path into the fake's filesystem.
 func (h *Host) Path(p string) string { return filepath.Join(h.Root, p) }
 
@@ -196,6 +206,12 @@ func (h *Host) WaitIdle() { h.runs.Wait() }
 func (h *Host) authorizedKeysPath() string { return h.Path("/var/lib/pbcm/.ssh/authorized_keys") }
 
 func (h *Host) pbcmKeyOK(k ssh.PublicKey) bool {
+	h.mu.Lock()
+	refuse := h.refusePbcm
+	h.mu.Unlock()
+	if refuse {
+		return false
+	}
 	raw, err := os.ReadFile(h.authorizedKeysPath())
 	if err != nil {
 		return false
