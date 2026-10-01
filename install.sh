@@ -67,6 +67,7 @@ fetch() { # url dest
 # ---- the program --------------------------------------------------------------
 if [[ -x "$SRC_DIR/pbcwm" && -z "$WANT_VERSION" ]]; then
   BIN="$SRC_DIR/pbcwm"
+  RUNNER_BIN="$SRC_DIR/pbcwm-runner"
   say "Installing from $SRC_DIR"
 else
   if [[ -z "$WANT_VERSION" ]]; then
@@ -83,7 +84,9 @@ else
   (cd "$WORK" && grep " $NAME.tar.gz\$" SHA256SUMS | sha256sum -c --quiet -) || fail "The download doesn't match its checksum. Try again."
   tar -xzf "$WORK/$NAME.tar.gz" -C "$WORK"
   BIN="$WORK/$NAME/pbcwm"
+  RUNNER_BIN="$WORK/$NAME/pbcwm-runner"
 fi
+[[ -f "$RUNNER_BIN" ]] || fail "pbcwm-runner is missing from the release files."
 "$BIN" version >/dev/null || fail "The pbcwm program won't run on this machine."
 NEW_VERSION="$("$BIN" version)"
 
@@ -104,6 +107,9 @@ OLD_VERSION=""
 systemctl stop pbcwm 2>/dev/null || true
 install -o "$USER_NAME" -g "$USER_NAME" -m 755 "$BIN" "$APP_DIR/pbcwm.new"
 mv -f "$APP_DIR/pbcwm.new" "$APP_DIR/pbcwm"
+# The copy sent to clients during setup (always x86-64, like proxmox-backup-client).
+install -o "$USER_NAME" -g "$USER_NAME" -m 755 "$RUNNER_BIN" "$APP_DIR/pbcwm-runner.new"
+mv -f "$APP_DIR/pbcwm-runner.new" "$APP_DIR/pbcwm-runner"
 
 cat > /usr/local/bin/pbcwm <<EOF
 #!/bin/sh

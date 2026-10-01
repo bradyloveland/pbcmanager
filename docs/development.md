@@ -4,6 +4,10 @@
 
 ```
 cmd/pbcwm/          The server program and its commands (serve, setup-code, passwd, totp-reset, network)
+cmd/pbcwm-runner/   The program installed on clients (always linux/amd64)
+internal/clients/   Adding, checking, browsing, repairing and removing clients; setup.sh runs on the client
+internal/runner/    pbcwm-runner's commands (detect, browse, uninstall) and its forced-command parser
+internal/sshx/      The server's SSH key, host key probing and pinning, running commands
 internal/auth/      Password hashing, TOTP, recovery codes, sign-in throttling
 internal/config/    Every setting: definitions, defaults, checks. Network settings.
 internal/qr/        QR codes for authenticator enrolment (standard library only)
@@ -39,6 +43,12 @@ Browser ── HTTP(S) ──> sniffing listener(s) ──> Server.ServeHTTP
   - If nobody confirms within about two minutes, the server goes back to the old settings.
   - A pending change is never saved, so a restart also undoes it.
 
+## Clients and pbcwm-runner
+
+`pbcwm-runner` is always built for linux/amd64, because that's the only platform `proxmox-backup-client` supports. The release archives (for both server architectures) include it next to `pbcwm`. The server reads it from beside its own executable, or from `PBCWM_RUNNER`.
+
+The fake SSH host in `internal/clients/clients_test.go` is the quickest way to see a change to the setup flow working.
+
 ## Running locally
 
 ```bash
@@ -66,6 +76,9 @@ Install the tools with `brew install go shellcheck` (or your package manager) an
 | `store` | Migrations, settings, admin secrets encrypted at rest, session idle expiry |
 | `config` | Every setting's checks and defaults, network settings |
 | `tlscert` | Self-signed certificates, mismatched or junk uploads |
+| `clients` | Over real SSH, against a fake Debian host run in the test. Covers: <ul><li>probing the host key</li><li>setup as root, as a sudo user (the password goes only to `sudo -S`), and with the server's key</li><li>refusing a host key that differs from the one checked</li><li>setup errors</li><li>duplicates</li><li>browse through the forced command</li><li>a changed host key blocking everything until repair</li><li>remove and uninstall</li></ul> |
+| `clients` (CI only) | `TestRealClient` sets up fresh Debian 13, 12, 11 and Ubuntu 24.04 containers for real: installs `proxmox-backup-client` from Proxmox, then browses, repairs and uninstalls |
+| `runner` | Command splitting (round-trips with the server's quoting, ignores shell syntax), detect, browse, uninstall removing only its own files and keeping the account when the server shares the machine |
 | `server` | The real server on local ports. Covers: <ul><li>setup code and throttling</li><li>sign-in, cookies, CSRF header</li><li>two-step sign-in with replay and recovery codes</li><li>sessions surviving a restart</li><li>settings</li><li>base path and trusted proxies</li><li>HTTPS and the HTTP redirect</li><li>network changes confirmed, undone, timed out, blocked by a busy port</li><li>switching to an uploaded certificate on the same port</li></ul> |
 
 CI (`.github/workflows/ci.yml`) also installs the built package on an Ubuntu runner with systemd. It checks that the server answers over HTTPS and finishes setup through the API. Then it upgrades in place with a new port, and uninstalls with `--purge`.

@@ -54,6 +54,7 @@
     </div>
     <nav class="nav" aria-label="Main">
       <a href="#/overview" data-nav="overview">Overview</a>
+      <a href="#/clients" data-nav="clients">Clients</a>
       <a href="#/settings" data-nav="settings">Settings</a>
       <a href="#/account" data-nav="account">Account</a>
     </nav>
@@ -67,6 +68,18 @@
     <div id="view"></div>
   </main>
 </div>
+
+<dialog id="picker">
+  <div class="modal-head">
+    <h2 class="m-0" id="picker-title">Folders</h2>
+    <div class="crumb" id="picker-path"></div>
+  </div>
+  <div class="modal-body"><ul class="dirs" id="picker-list"></ul></div>
+  <div class="modal-foot">
+    <button class="btn" type="button" id="picker-cancel">Close</button>
+    <button class="btn primary hidden" type="button" id="picker-choose">Use this folder</button>
+  </div>
+</dialog>
 
 <div id="fatal" class="hidden"></div>
 <div id="toasts" aria-live="polite"></div>

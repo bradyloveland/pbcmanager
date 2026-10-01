@@ -1,6 +1,6 @@
 # Proxmox Backup Client Web Manager 2: design
 
-Status: **in progress**. Milestone 1 is built; see the progress table in the README.
+Status: **in progress**. Milestones 1 and 2 are built; see the progress table in the README.
 
 Version 2 is a rewrite in Go of PBS Backup Manager 1.x, under a new name: **Proxmox Backup Client Web Manager**. It manages file-level backups on many Linux machines (clients) from one central server, sending each client's backups to one or more Proxmox Backup Server (PBS) destinations.
 
@@ -49,9 +49,10 @@ These match what `proxmox-backup-client` supports:
 | Client | How the client software is installed |
 | --- | --- |
 | Debian 13 (trixie), 12 (bookworm) | Proxmox `pbs-client` apt repository, package `proxmox-backup-client` |
-| Debian 11 (bullseye), 10 (buster) | Same repository, older client versions. The UI warns that these are older. |
-| Debian-based (Ubuntu, OMV, Proxmox VE hosts) | Already present on Proxmox VE. Otherwise the matching Debian repository if the base is known, or the static build |
-| Any other x86-64 Linux | Static build (`proxmox-backup-client-static`), copied to the client as a single executable |
+| Debian 11 (bullseye) | Same repository, its own signing key, an older client version |
+| Debian 10 and other apt-based systems (Ubuntu, Mint…) | Proxmox's static build, `proxmox-backup-client-static`, from the Debian 12 repository (Proxmox's Debian 10 repository is now empty) |
+| Proxmox VE hosts, OMV | Already have it, or get the Debian package for their base |
+| Other x86-64 Linux (no apt) | Install the static client by hand, then use Repair. Automatic install may come later. |
 | Non-x86-64 (ARM etc.) | Not supported. The UI says so plainly. |
 
 Clients also need systemd. Every supported Debian release has it.
@@ -95,10 +96,12 @@ Browser ─HTTPS─> │ pbcwm: web UI + API, SQLite, SSH key, updater, notifier
    1. detects the OS, CPU type and systemd version
    2. installs `proxmox-backup-client` if it's missing ([Supported clients](#supported-clients)), streaming the output into the UI
    3. creates the `pbcwm` system user, with no password and a locked password login
-   4. adds the server's public key to that user's `authorized_keys`, with the `restrict` option (no port forwarding, no shell prompt)
-   5. installs `pbcwm-runner`, plus a sudo rule letting `pbcwm` run **only** `pbcwm-runner`. The rule is checked with `visudo -c` before it's put in place.
+   4. adds the server's public key to that user's `authorized_keys`, with `restrict` and a forced command: `command="sudo -n /usr/local/lib/pbcwm/pbcwm-runner ssh"`. Whatever the server asks for arrives in `SSH_ORIGINAL_COMMAND`, which pbcwm-runner parses itself (no shell), so the key can't run anything else even if the server is compromised
+   5. installs `pbcwm-runner`, plus a sudo rule letting `pbcwm` run **only** `pbcwm-runner` (and keeping `SSH_ORIGINAL_COMMAND`). The rule is checked with `visudo -c` before it's put in place.
    6. installs the systemd unit templates
-4. The server signs in again as `pbcwm` to prove the new account works, then **forgets the root password**. Root is never used again unless you choose **Repair client**, which asks for root again.
+4. The server signs in again as `pbcwm` to prove the new account works, then **forgets the root password**.
+
+The setup files (the script, pbcwm-runner and the server's key) are uploaded into a private temporary folder and the script runs from there. With a sudo user, the password goes only to `sudo -S` on standard input, never on a command line or to any other command. Root is never used again unless you choose **Repair client**, which asks for root again.
 
 The UI suggests turning off root password login over SSH once a client is added. The server doesn't change the client's SSH settings itself.
 
@@ -108,11 +111,11 @@ The UI suggests turning off root password login over SSH once a client is added.
 | --- | --- |
 | `/usr/local/lib/pbcwm/pbcwm-runner` | Small Go program, owned by root, signed like server releases. It isn't a background service: systemd starts it for a backup, or the server starts it over SSH for one command, and it exits when done. |
 | `/etc/sudoers.d/pbcwm` | `pbcwm ALL=(root) NOPASSWD: /usr/local/lib/pbcwm/pbcwm-runner` |
-| `/etc/pbcwm/jobs/<job>.json` | Folders, exclusions, options and destinations for each job |
-| `/etc/pbcwm/credentials/` | Token secrets and key file passwords (see [Credentials on clients](#credentials-on-clients)) |
+| `/etc/pbcwm/client/jobs/<job>.json` | Folders, exclusions, options and destinations for each job |
+| `/etc/pbcwm/client/credentials/` | Token secrets and key file passwords (see [Credentials on clients](#credentials-on-clients)) |
 | `/etc/systemd/system/pbcwm-job@.service` | One template unit used by every job |
 | `/etc/systemd/system/pbcwm-job-<job>.timer` | One timer per scheduled job |
-| `/var/lib/pbcwm/runs/` | One folder per run with its result and log. Kept for 90 days or the last 500 runs. Both limits can be changed in Settings. |
+| `/var/lib/pbcwm/client/runs/` | One folder per run with its result and log. Kept for 90 days or the last 500 runs. Both limits can be changed in Settings. |
 
 `pbcwm-runner` commands (the server calls these through `sudo`):
 

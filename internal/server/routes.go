@@ -2,9 +2,12 @@ package server
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"io/fs"
 	"net/http"
 	"path"
+	"sync"
 	"time"
 
 	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/version"
@@ -38,6 +41,17 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/settings/network/cancel", priv(s.apiNetworkCancel))
 	m.HandleFunc("POST /api/settings/network/regenerate-certificate", priv(s.apiNetworkRegenerate))
 
+	m.HandleFunc("GET /api/settings/ssh", priv(s.apiSSH))
+	m.HandleFunc("GET /api/clients", priv(s.apiClients))
+	m.HandleFunc("POST /api/clients", priv(s.apiClientAdd))
+	m.HandleFunc("POST /api/clients/probe", priv(s.apiClientProbe))
+	m.HandleFunc("GET /api/clients/{id}", priv(s.apiClient))
+	m.HandleFunc("POST /api/clients/{id}/check", priv(s.apiClientCheck))
+	m.HandleFunc("POST /api/clients/{id}/repair", priv(s.apiClientRepair))
+	m.HandleFunc("GET /api/clients/{id}/browse", priv(s.apiClientBrowse))
+	m.HandleFunc("POST /api/clients/{id}/remove", priv(s.apiClientRemove))
+	m.HandleFunc("GET /api/tasks/{id}", priv(s.apiTask))
+
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found."})
 	})
@@ -57,14 +71,24 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "The web UI is missing from this build.", http.StatusInternalServerError)
 		return
 	}
-	// Asset URLs carry the version so an update never serves a stale script.
-	raw = bytes.ReplaceAll(raw, []byte("{{VERSION}}"), []byte(version.Version))
+	// Asset URLs carry a hash of the UI files, so a new build never gets a
+	// stale cached script, even when the version number hasn't changed.
+	raw = bytes.ReplaceAll(raw, []byte("{{VERSION}}"), []byte(assetTag()))
 	w.Header().Set("Content-Security-Policy", csp)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(raw)
 }
 
 var started = time.Now()
+
+var assetTag = sync.OnceValue(func() string {
+	h := sha256.New()
+	for _, name := range []string{"app.js", "app.css", "icon.svg", "index.html"} {
+		raw, _ := fs.ReadFile(web.Files, name)
+		h.Write(raw)
+	}
+	return version.Version + "-" + hex.EncodeToString(h.Sum(nil))[:10]
+})
 
 func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request) {
 	name := path.Base(r.PathValue("file"))

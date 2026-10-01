@@ -712,3 +712,31 @@ func TestRegenerateSelfSigned(t *testing.T) {
 		t.Fatal("new certificate should be served straight away")
 	}
 }
+
+// ---------------------------------------------------------------- clients
+
+func TestClientEndpoints(t *testing.T) {
+	e := newEnv(t, nil, true)
+	c := e.client()
+	for _, p := range []string{"/api/clients", "/api/settings/ssh", "/api/tasks/x"} {
+		expect(t, c.get(p), 401, "")
+	}
+	c.login()
+	r := c.get("/api/settings/ssh")
+	expect(t, r, 200, "ssh-ed25519 ")
+	if !strings.HasPrefix(r.data["fingerprint"].(string), "SHA256:") || !strings.HasSuffix(r.data["public_key"].(string), "pbcwm-server@nas") {
+		t.Fatalf("ssh: %v", r.data)
+	}
+	// The key is created once and kept.
+	e.stop()
+	e.start()
+	if again := c.get("/api/settings/ssh"); again.data["public_key"] != r.data["public_key"] {
+		t.Fatal("server SSH key changed across a restart")
+	}
+	expect(t, c.get("/api/clients"), 200, `"clients":[]`)
+	expect(t, c.post("/api/clients/probe", map[string]any{"address": "not a host!", "port": 22}), 400, "host name or IP")
+	expect(t, c.post("/api/clients/probe", map[string]any{"address": "127.0.0.1", "port": freePort(t)}), 502, "refused")
+	expect(t, c.post("/api/clients", map[string]any{"address": "127.0.0.1", "host_key": "junk", "login": map[string]any{"password": "x"}}), 400, "host key")
+	expect(t, c.get("/api/clients/nope"), 404, "doesn't exist")
+	expect(t, c.get("/api/tasks/nope"), 404, "")
+}

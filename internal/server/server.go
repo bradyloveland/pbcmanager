@@ -14,12 +14,15 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/auth"
+	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/clients"
 	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/config"
+	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/sshx"
 	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/store"
 )
 
@@ -39,6 +42,9 @@ type Options struct {
 	ConfirmWindow time.Duration
 	// Hostname overrides os.Hostname (tests).
 	Hostname string
+	// RunnerPath is the pbcwm-runner (linux/amd64) sent to clients. By
+	// default it's next to this program.
+	RunnerPath string
 }
 
 // Server serves the UI and API.
@@ -48,6 +54,7 @@ type Server struct {
 	throttle *auth.Throttle
 	mux      *http.ServeMux
 	http     *http.Server
+	clients  *clients.Manager
 
 	mu         sync.Mutex
 	active     config.Network
@@ -81,6 +88,16 @@ func New(opts Options) (*Server, error) {
 		stop: make(chan struct{}),
 	}
 	s.throttle.Delay = opts.FailDelay
+	if opts.RunnerPath == "" {
+		if exe, err := os.Executable(); err == nil {
+			opts.RunnerPath = filepath.Join(filepath.Dir(exe), "pbcwm-runner")
+		}
+	}
+	id, err := sshx.LoadOrCreateIdentity(filepath.Join(opts.ConfigDir, "ssh", "id_ed25519"), "pbcwm-server@"+opts.Hostname)
+	if err != nil {
+		return nil, fmt.Errorf("server SSH key: %w", err)
+	}
+	s.clients = clients.New(opts.Store, id, opts.RunnerPath)
 	s.mux = http.NewServeMux()
 	s.routes()
 	s.http = &http.Server{

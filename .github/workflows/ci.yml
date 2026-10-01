@@ -29,7 +29,63 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: shellcheck -x install.sh uninstall.sh scripts/*.sh
+      - run: shellcheck -x install.sh uninstall.sh scripts/*.sh internal/clients/setup.sh
+
+  clients:
+    # Sets up real Debian and Ubuntu machines (containers with an SSH
+    # server) as clients: installs proxmox-backup-client from Proxmox, creates
+    # the pbcwm account and sudo rule, browses, repairs and uninstalls.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {image: "debian:trixie", user: root}
+          - {image: "debian:bookworm", user: root}
+          - {image: "debian:bullseye", user: root}
+          - {image: "ubuntu:24.04", user: alice, extra: sudo, expect: "static build"}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Start the client container
+        env:
+          IMAGE: ${{ matrix.image }}
+          EXTRA: ${{ matrix.extra }}
+          SETUP_USER: ${{ matrix.user }}
+        run: |
+          docker run -d --name client -p 127.0.0.1:2222:22 -e EXTRA -e SETUP_USER "$IMAGE" bash -c '
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -q
+            apt-get install -y -q --no-install-recommends openssh-server systemd $EXTRA
+            mkdir -p /run/sshd
+            echo "root:ci-root-password" | chpasswd
+            sed -i "s/^#\?PermitRootLogin.*/PermitRootLogin yes/" /etc/ssh/sshd_config
+            if [ "$SETUP_USER" != root ]; then
+              useradd -m -s /bin/bash "$SETUP_USER"
+              echo "$SETUP_USER:ci-root-password" | chpasswd
+              usermod -aG sudo "$SETUP_USER"
+            fi
+            exec /usr/sbin/sshd -D -e'
+          for i in $(seq 1 120); do
+            if ssh-keyscan -p 2222 127.0.0.1 >/dev/null 2>&1; then echo "SSH is up"; exit 0; fi
+            sleep 2
+          done
+          docker logs client; exit 1
+      - name: Set up the client
+        env:
+          PBCWM_IT_ADDR: 127.0.0.1:2222
+          PBCWM_IT_USER: ${{ matrix.user }}
+          PBCWM_IT_PASSWORD: ci-root-password
+          PBCWM_IT_EXPECT: ${{ matrix.expect }}
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$RUNNER_TEMP/pbcwm-runner" ./cmd/pbcwm-runner
+          PBCWM_IT_RUNNER="$RUNNER_TEMP/pbcwm-runner" go test -count=1 -v -run TestRealClient ./internal/clients/
+      - name: Container log
+        if: failure()
+        run: docker logs client | tail -50
 
   package:
     runs-on: ubuntu-latest
@@ -64,6 +120,7 @@ jobs:
           cd dist/pbcwm-*-linux-amd64
           sudo ./install.sh --skip-client | tee install.log
           grep -q "Setup code:" install.log
+          test -x /opt/pbcwm/pbcwm-runner
       - name: Serves HTTPS and asks for setup
         run: |
           curl -fsk https://127.0.0.1:8099/api/health

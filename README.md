@@ -18,8 +18,8 @@ The full plan is in [docs/design-v2.md](docs/design-v2.md).
 | Milestone | State |
 | --- | --- |
 | M1: server base: sign-in with two-step verification, setup in the browser, Settings page (including network and HTTPS with confirm-or-undo), installer, CI | **Done** |
-| M2: clients over SSH | Next |
-| M3: backups | |
+| M2: clients over SSH: add as root once, automatic `proxmox-backup-client` install, limited `pbcwm` account, host key pinning, folder browser, repair and remove | **Done** |
+| M3: backups | Next |
 | M4: dashboard | |
 | M5: updates from the browser | |
 | M6: moving from 1.x, docs, 2.0.0 release | |
