@@ -140,13 +140,16 @@ jobs:
           docker exec pbs mkdir -p /datastore
           docker exec pbs proxmox-backup-manager datastore create store /datastore
           docker exec pbs proxmox-backup-manager user create ci@pbs
-          docker exec pbs proxmox-backup-manager user generate-token ci@pbs ci --output-format json > token.json
+          # generate-token prints JSON containing "value": "<secret>".
+          secret=$(docker exec pbs proxmox-backup-manager user generate-token ci@pbs ci |
+            python3 -c 'import re,sys; print(re.search(r"\"value\"\s*:\s*\"([^\"]+)\"", sys.stdin.read()).group(1))')
+          echo "::add-mask::$secret"
           docker exec pbs proxmox-backup-manager acl update /datastore/store DatastoreBackup --auth-id 'ci@pbs!ci'
           docker exec pbs proxmox-backup-manager acl update /datastore/store DatastoreBackup --auth-id ci@pbs
           fp=$(docker exec pbs proxmox-backup-manager cert info | sed -n 's/^Fingerprint (sha256): //p')
           ip() { docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$1"; }
           {
-            echo "PBCM_E2E_TOKEN_SECRET=$(python3 -c 'import json;print(json.load(open("token.json"))["value"])')"
+            echo "PBCM_E2E_TOKEN_SECRET=$secret"
             echo "PBCM_E2E_FINGERPRINT=$fp"
             echo "PBCM_E2E_PBS=$(ip pbs)"
             echo "PBCM_E2E_CLIENT=$(ip client)"
