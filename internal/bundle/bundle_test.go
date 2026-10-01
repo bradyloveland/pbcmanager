@@ -115,3 +115,25 @@ func TestSummarizeError(t *testing.T) {
 		t.Fatal("empty log")
 	}
 }
+
+func TestPrev(t *testing.T) {
+	at := func(s string) time.Time { v, _ := time.ParseInLocation("2006-01-02 15:04", s, time.UTC); return v }
+	daily := Schedule{Type: "daily", Time: "02:00", Days: []int{0, 1, 2, 3, 4, 5, 6}}
+	if got := Prev(daily, true, at("2026-10-01 10:20")); got != at("2026-10-01 02:00") {
+		t.Fatalf("daily prev %s", got)
+	}
+	if got := Prev(daily, true, at("2026-10-01 02:00")); got != at("2026-10-01 02:00") {
+		t.Fatalf("prev includes t itself: %s", got)
+	}
+	weekly := Schedule{Type: "daily", Time: "09:00", Days: []int{0}} // Mondays
+	if got := Prev(weekly, true, at("2026-10-01 10:20")); got != at("2026-09-28 09:00") {
+		t.Fatalf("weekly prev %s", got)
+	}
+	hourly := Schedule{Type: "hourly", Time: "00:15", IntervalHours: 6}
+	if got := Prev(hourly, true, at("2026-10-01 10:20")); got != at("2026-10-01 06:15") {
+		t.Fatalf("hourly prev %s", got)
+	}
+	if !Prev(Schedule{Type: "manual"}, true, at("2026-10-01 10:20")).IsZero() || !Prev(daily, false, at("2026-10-01 10:20")).IsZero() {
+		t.Fatal("manual or paused jobs have no previous run")
+	}
+}

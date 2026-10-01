@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bradyloveland/pbcmanager/internal/alerts"
 	"github.com/bradyloveland/pbcmanager/internal/auth"
 	"github.com/bradyloveland/pbcmanager/internal/backups"
 	"github.com/bradyloveland/pbcmanager/internal/clients"
@@ -59,6 +60,7 @@ type Server struct {
 	http     *http.Server
 	clients  *clients.Manager
 	pbs      *backups.PBS
+	notifier *alerts.Notifier
 	pollStop context.CancelFunc
 
 	mu         sync.Mutex
@@ -112,6 +114,13 @@ func New(opts Options) (*Server, error) {
 	s.clients.Sync.KeepDays = func() int { return s.settingInt("history.client_days") }
 	s.clients.Sync.KeepServerRuns = func() int { return s.settingInt("history.server_runs") }
 	s.pbs = &backups.PBS{}
+	s.notifier = &alerts.Notifier{Store: opts.Store, Settings: s.alertSettings, ServerName: s.serverName,
+		PublicURL: func() string { return s.settingString("general.public_url") },
+		LogPath: func(clientID, runID string) string {
+			return filepath.Join(opts.DataDir, "logs", clientID, runID+".log")
+		}}
+	s.clients.Sync.OnFinished = s.notifier.RunFinished
+	s.clients.Sync.OnReachable = s.notifier.ClientReachable
 	s.mux = http.NewServeMux()
 	s.routes()
 	s.http = &http.Server{
@@ -156,6 +165,7 @@ func (s *Server) Start() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.pollStop = cancel
 	go s.clients.Poll(ctx)
+	go s.notifier.Loop(ctx)
 	return nil
 }
 

@@ -68,6 +68,11 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/jobs/{id}/cancel", priv(s.apiJobCancel))
 	m.HandleFunc("GET /api/jobs/{id}/snapshots", priv(s.apiJobSnapshots))
 
+	m.HandleFunc("GET /api/alerts", priv(s.apiAlertList))
+	m.HandleFunc("GET /api/alerts/settings", priv(s.apiAlertSettings))
+	m.HandleFunc("PUT /api/alerts/settings", priv(s.apiAlertSettingsUpdate))
+	m.HandleFunc("POST /api/alerts/test", priv(s.apiAlertTest))
+
 	m.HandleFunc("GET /api/runs", priv(s.apiRuns))
 	m.HandleFunc("GET /api/runs/{client}/{id}", priv(s.apiRun))
 	m.HandleFunc("GET /api/runs/{client}/{id}/log", priv(s.apiRunLog))

@@ -4,6 +4,9 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"time"
+	// Time zone data, so client time zones resolve on any server.
+	_ "time/tzdata"
 )
 
 // Client statuses.
@@ -41,6 +44,10 @@ type Client struct {
 	ApplyError  string `json:"apply_error"`
 	// RunCursor is where the next status request starts (unix seconds).
 	RunCursor int64 `json:"run_cursor"`
+	// Timezone is the client's time zone (IANA name), "" if unknown.
+	Timezone string `json:"timezone"`
+	// UnreachableSince is when the server lost contact (0 = reachable).
+	UnreachableSince int64 `json:"unreachable_since"`
 }
 
 // ErrNotFound means the record doesn't exist.
@@ -53,14 +60,14 @@ func (e *ErrDuplicate) Error() string { return "duplicate " + e.Field }
 
 const clientCols = `id, name, address, port, host_key, status, status_detail, offered_key, os_id, os_pretty,
 	os_codename, arch, hostname, systemd_version, client_version, runner_version, server_here, last_contact, created_at,
-	applied_hash, apply_error, run_cursor`
+	applied_hash, apply_error, run_cursor, timezone, unreachable_since`
 
 func scanClient(row interface{ Scan(...any) error }) (*Client, error) {
 	var c Client
 	var here int
 	err := row.Scan(&c.ID, &c.Name, &c.Address, &c.Port, &c.HostKey, &c.Status, &c.StatusDetail, &c.OfferedKey,
 		&c.OSID, &c.OSPretty, &c.OSCodename, &c.Arch, &c.Hostname, &c.SystemdVersion, &c.ClientVersion,
-		&c.RunnerVersion, &here, &c.LastContact, &c.CreatedAt, &c.AppliedHash, &c.ApplyError, &c.RunCursor)
+		&c.RunnerVersion, &here, &c.LastContact, &c.CreatedAt, &c.AppliedHash, &c.ApplyError, &c.RunCursor, &c.Timezone, &c.UnreachableSince)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -85,10 +92,10 @@ func dupError(err error) error {
 // CreateClient inserts a client.
 func (s *Store) CreateClient(c *Client) error {
 	c.CreatedAt = s.Now().Unix()
-	_, err := s.db.Exec(`INSERT INTO clients (`+clientCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err := s.db.Exec(`INSERT INTO clients (`+clientCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		c.ID, c.Name, c.Address, c.Port, c.HostKey, c.Status, c.StatusDetail, c.OfferedKey, c.OSID, c.OSPretty,
 		c.OSCodename, c.Arch, c.Hostname, c.SystemdVersion, c.ClientVersion, c.RunnerVersion, boolInt(c.ServerHere),
-		c.LastContact, c.CreatedAt, c.AppliedHash, c.ApplyError, c.RunCursor)
+		c.LastContact, c.CreatedAt, c.AppliedHash, c.ApplyError, c.RunCursor, c.Timezone, c.UnreachableSince)
 	return dupError(err)
 }
 
@@ -96,10 +103,11 @@ func (s *Store) CreateClient(c *Client) error {
 func (s *Store) SaveClient(c *Client) error {
 	res, err := s.db.Exec(`UPDATE clients SET name=?, address=?, port=?, host_key=?, status=?, status_detail=?,
 		offered_key=?, os_id=?, os_pretty=?, os_codename=?, arch=?, hostname=?, systemd_version=?, client_version=?,
-		runner_version=?, server_here=?, last_contact=?, applied_hash=?, apply_error=?, run_cursor=? WHERE id=?`,
+		runner_version=?, server_here=?, last_contact=?, applied_hash=?, apply_error=?, run_cursor=?, timezone=?,
+		unreachable_since=? WHERE id=?`,
 		c.Name, c.Address, c.Port, c.HostKey, c.Status, c.StatusDetail, c.OfferedKey, c.OSID, c.OSPretty, c.OSCodename,
 		c.Arch, c.Hostname, c.SystemdVersion, c.ClientVersion, c.RunnerVersion, boolInt(c.ServerHere), c.LastContact,
-		c.AppliedHash, c.ApplyError, c.RunCursor, c.ID)
+		c.AppliedHash, c.ApplyError, c.RunCursor, c.Timezone, c.UnreachableSince, c.ID)
 	if err != nil {
 		return dupError(err)
 	}
@@ -143,4 +151,14 @@ func boolInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// Location is the client's time zone, or the server's own if unknown.
+func (c *Client) Location() *time.Location {
+	if c.Timezone != "" {
+		if loc, err := time.LoadLocation(c.Timezone); err == nil {
+			return loc
+		}
+	}
+	return time.Local
 }

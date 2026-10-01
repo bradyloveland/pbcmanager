@@ -36,6 +36,16 @@ Version 2: a rewrite in Go, renamed PBC Manager. Work in progress; see docs/desi
   - **Pages:** a live log for each run, an Activity page across all clients, snapshot lists from PBS, and the Dashboard showing each job's last 20 runs.
   - **New settings** for how much run history clients and the server keep.
 
+- **Email alerts** (milestone 3b) on a new Alerts page:
+  - **Mail server settings:** SMTP with STARTTLS, SSL or none, an optional sign-in (the password is write-only and encrypted), several recipients, and a test email.
+  - **Failed backups,** including interrupted ones, with the reason and the end of the log. **Successful backups** are optional.
+  - **Missed backups:** a scheduled backup that didn't start within a grace period you set, judged once the server has heard from the client.
+  - **Unreachable clients:** a client the server can't reach for longer than a time you set, and another email when it's back.
+  - **Late reports:** alerts about a run the server only heard about late (it was down, or couldn't reach the client) say so.
+  - **Each alert is sent once.** Recent alerts are listed with whether the email went out.
+- **Client time zones:** clients report theirs, so next-run times and missed-backup checks follow the client's clock.
+- **New setting, "Web address of this server",** so alert emails link to the run.
+
 ### Changed
 - The UI runs under a strict Content Security Policy with no inline scripts or styles.
 - UI files are cache-busted by content, so browsers never run a stale script after an upgrade.

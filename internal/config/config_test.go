@@ -14,6 +14,8 @@ func TestCleanSettings(t *testing.T) {
 		{"security.session_hours", "24", 24},
 		{"general.server_name", `"  nas  "`, "nas"},
 		{"general.server_name", `""`, ""},
+		{"general.public_url", `"https://backups.example.net"`, "https://backups.example.net/"},
+		{"general.public_url", `""`, ""},
 	}
 	for _, c := range ok {
 		got, err := Clean(c.key, json.RawMessage(c.raw))
@@ -28,6 +30,8 @@ func TestCleanSettings(t *testing.T) {
 		{"general.server_name", `"` + strings.Repeat("x", 65) + `"`, "at most 64"},
 		{"general.server_name", `"a\u0007b"`, "control characters"},
 		{"nope", "1", "Unknown setting"},
+		{"general.public_url", `"backups.example.net"`, "Enter the address"},
+		{"general.public_url", `"javascript:alert(1)"`, "Enter the address"},
 	}
 	for _, c := range bad {
 		if _, err := Clean(c.key, json.RawMessage(c.raw)); err == nil || !strings.Contains(err.Error(), c.msg) {

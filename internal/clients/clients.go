@@ -410,6 +410,9 @@ func (m *Manager) refresh(ctx context.Context, c *store.Client) error {
 			c.StatusDetail = "The client's SSH host key has changed. If it was reinstalled, check the new key and use Repair; otherwise, investigate before trusting it."
 		} else {
 			c.Status, c.StatusDetail = store.ClientUnreachable, err.Error()
+			if c.UnreachableSince == 0 {
+				c.UnreachableSince = time.Now().Unix()
+			}
 		}
 		_ = m.store.SaveClient(c)
 		return err
@@ -420,8 +423,9 @@ func (m *Manager) refresh(ctx context.Context, c *store.Client) error {
 	}
 	c.OSID, c.OSPretty, c.OSCodename, c.Arch = info.OSID, info.OSPretty, info.OSCodename, info.Arch
 	c.Hostname, c.SystemdVersion, c.ClientVersion, c.RunnerVersion = info.Hostname, info.SystemdVersion, info.ClientVersion, info.RunnerVersion
-	c.ServerHere, c.LastContact = info.ServerHere, time.Now().Unix()
+	c.ServerHere, c.LastContact, c.Timezone = info.ServerHere, time.Now().Unix(), info.Timezone
 	c.Status, c.StatusDetail, c.OfferedKey = store.ClientReady, "", ""
+	m.backOnline(c)
 	if info.ClientVersion == "" {
 		c.Status, c.StatusDetail = store.ClientError, "proxmox-backup-client isn't installed on the client. Use Repair to install it."
 	}

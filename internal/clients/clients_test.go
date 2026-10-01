@@ -105,7 +105,7 @@ func TestAddAsRoot(t *testing.T) {
 	if !v.OK || c.Status != store.ClientReady {
 		t.Fatalf("setup failed: %+v %v", v, c.StatusDetail)
 	}
-	if c.OSPretty != "Debian GNU/Linux 12 (bookworm)" || c.ClientVersion != "3.4.1" || c.Hostname == "" || c.LastContact == 0 || c.Arch != "x86_64" {
+	if c.OSPretty != "Debian GNU/Linux 12 (bookworm)" || c.ClientVersion != "3.4.1" || c.Hostname == "" || c.LastContact == 0 || c.Arch != "x86_64" || c.Timezone != "America/Denver" {
 		t.Fatalf("details not saved: %+v", c)
 	}
 	if string(h.host.Uploaded(tmpDir+"/pbcm-runner")) != "RUNNER-BINARY" || !bytes.Equal(h.host.Uploaded(tmpDir+"/setup.sh"), setupScript) ||
