@@ -54,6 +54,9 @@ func TestImportFrom1xAndExport(t *testing.T) {
 		return c.get("/api/clients/" + clientID).data["client"].(map[string]any)["settings_pending"] == false
 	})
 
+	// The imported job is paused, so it can't be run until it's turned on.
+	expect(t, c.post("/api/jobs/"+j["id"].(string)+"/run", nil), 400, "This job is paused")
+
 	r = c.get("/api/settings/export")
 	expect(t, r, 200, `"format":"pbcm-settings"`)
 	if !strings.Contains(r.header.Get("Content-Disposition"), "pbcm-settings-nas-") {

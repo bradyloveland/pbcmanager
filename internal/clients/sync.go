@@ -167,6 +167,9 @@ func (m *Manager) StartJob(ctx context.Context, jobID string) error {
 	if err != nil {
 		return err
 	}
+	if !j.Enabled {
+		return &InputError{"This job is paused, so it can't run. Edit it and turn on Run on schedule first."}
+	}
 	if m.Pending(c) {
 		if err := m.Apply(ctx, c.ID); err != nil {
 			return fmt.Errorf("couldn't send the latest settings to %s first: %w", c.Name, err)

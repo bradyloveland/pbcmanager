@@ -416,7 +416,10 @@ function jobLedger(jobs, sizes) {
     </div>`).join("")}</div>`;
 }
 function runButton(j) {
-  return isRunning(j) ? `<button class="btn small" data-cancel="${esc(j.id)}">Cancel</button>` : `<button class="btn small" data-run="${esc(j.id)}">Run now</button>`;
+  // A running backup can always be cancelled; a paused job can't be started.
+  if (isRunning(j)) return `<button class="btn small" data-cancel="${esc(j.id)}">Cancel</button>`;
+  if (!j.enabled) return `<button class="btn small" disabled title="This job is paused. Edit it and turn on Run on schedule to run it." aria-label="Run now (unavailable: this job is paused)">Run now</button>`;
+  return `<button class="btn small" data-run="${esc(j.id)}">Run now</button>`;
 }
 function bindRunButtons(refresh) {
   $$("[data-run]").forEach(b => b.addEventListener("click", async () => {
@@ -555,7 +558,7 @@ async function viewJobForm(id, token, presetClient) {
             <small>Each destination is backed up in turn. For an offsite copy, a sync job in PBS (one PBS pulling from another) reads the client's files only once.</small></div>
           <label class="field"><span>Backup ID</span><input type="text" name="backup_id" value="${esc(j.backup_id)}" class="mono" placeholder="The client's host name">
             <small>The group name on the server (host/<i>id</i>). Keep it the same so each run builds on the last one.</small></label>
-          <label class="check"><input type="checkbox" name="enabled" ${j.enabled ? "checked" : ""}><span><b>Run on schedule</b><br><span class="hint">Turn off to pause scheduled runs. You can still use Run now.</span></span></label>
+          <label class="check"><input type="checkbox" name="enabled" ${j.enabled ? "checked" : ""}><span><b>Run on schedule</b><br><span class="hint">Turn off to pause the job: it won't run on schedule or with Run now.</span></span></label>
         </div>
       </fieldset>
       <fieldset class="section"><legend>Folders to back up</legend>

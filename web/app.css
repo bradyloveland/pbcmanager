@@ -194,7 +194,8 @@ tr.clickable:hover td{background:var(--surface-2)}
 .ledger-head,.jobrow{display:grid;grid-template-columns:minmax(170px,1.3fr) minmax(200px,1.3fr) minmax(140px,1fr) minmax(130px,.9fr) 104px;gap:18px;align-items:center;padding:14px 20px}
 .ledger-head{font-size:12.5px;color:var(--muted);border-bottom:1px solid var(--line);padding-top:11px;padding-bottom:11px;background:var(--surface-2)}
 .jobrow + .jobrow{border-top:1px solid var(--line)}
-.jobrow.paused{opacity:.62}
+/* A paused job: fade what it would do, not the row's controls. */
+.jobrow.paused .tape,.jobrow.paused .state,.jobrow.paused > .small{opacity:.62}
 .tape{display:flex;gap:3px;align-items:flex-end;height:30px}
 .tape a,.tape span{display:block;width:9px;height:24px;border-radius:2px;background:var(--idle);opacity:.45}
 .tape .success{background:var(--ok);opacity:1}

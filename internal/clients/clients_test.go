@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -412,6 +413,24 @@ func TestApplyRunCollectAndLog(t *testing.T) {
 	}
 	if _, err := os.Stat(h.host.Path("/etc/systemd/system/pbcm-job-j1.timer")); err == nil {
 		t.Fatal("manual job's timer should be gone")
+	}
+}
+
+func TestPausedJobCantBeStarted(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	c, j := h.jobSetup(t, "/srv/media")
+	j.Enabled = false
+	h.st.SaveJob(j)
+	if err := h.m.Apply(ctx, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	var in *InputError
+	if err := h.m.StartJob(ctx, j.ID); !errors.As(err, &in) || !strings.Contains(in.Message, "paused") {
+		t.Fatalf("starting a paused job: %v", err)
+	}
+	if h.host.Running(j.ID) {
+		t.Fatal("nothing should have started")
 	}
 }
 

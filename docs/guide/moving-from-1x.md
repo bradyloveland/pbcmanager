@@ -45,7 +45,7 @@ systemctl disable --now pbs-manager
 
 ## 6. Turn on the new jobs
 
-For each imported job, choose **Edit job**, tick **Run on schedule**, and save. Or press **Run now** to try one first. The client gets the schedule straight away.
+For each imported job, choose **Edit job**, tick **Run on schedule**, and save. The client gets the schedule straight away. To try a job before its first scheduled run, press **Run now**. A paused job can't be run, not even by hand.
 
 ## 7. Remove 1.x
 
