@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PBC Manager</title>
+<link rel="icon" href="assets/icon.svg?v={{VERSION}}" type="image/svg+xml">
+<link rel="stylesheet" href="assets/app.css?v={{VERSION}}">
+<script src="assets/app.js?v={{VERSION}}" defer></script>
+</head>
+<body>
+<div id="gate" class="login hidden">
+  <div class="panel" id="gate-panel">
+    <h1 id="gate-title">PBC Manager</h1>
+    <p class="muted small" id="gate-sub"></p>
+    <div id="gate-banner"></div>
+
+    <form id="setup-form" class="hidden" novalidate>
+      <p class="muted small m-0">Enter the setup code shown when the server was installed, then choose the admin sign-in. To see the code again, run <span class="mono">sudo pbcm setup-code</span> on the server.</p>
+      <label class="field"><span>Setup code</span><input type="text" name="code" class="mono" autocomplete="off" placeholder="XXXX-XXXX-XXXX" required></label>
+      <label class="field"><span>Admin username</span><input type="text" name="username" value="admin" autocomplete="username" required></label>
+      <label class="field"><span>Password</span><input type="password" name="password" autocomplete="new-password" required><small>At least 10 characters.</small></label>
+      <label class="field"><span>Repeat password</span><input type="password" name="again" autocomplete="new-password" required></label>
+      <div class="result bad hidden" role="alert" data-error></div>
+      <button class="btn primary" type="submit">Finish setup</button>
+    </form>
+
+    <form id="login-form" class="hidden" novalidate>
+      <label class="field"><span>Username</span><input type="text" name="username" autocomplete="username" required></label>
+      <label class="field"><span>Password</span><input type="password" name="password" autocomplete="current-password" required></label>
+      <div class="result bad hidden" role="alert" data-error></div>
+      <button class="btn primary" type="submit">Sign in</button>
+    </form>
+
+    <form id="totp-form" class="hidden" novalidate>
+      <p class="muted small m-0" id="totp-help">Open your authenticator app and enter the 6-digit code for PBC Manager.</p>
+      <label class="field"><span id="totp-label">Verification code</span>
+        <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required></label>
+      <div class="result bad hidden" role="alert" data-error></div>
+      <button class="btn primary" type="submit">Verify</button>
+      <div class="login-links">
+        <button type="button" class="linkbtn" id="use-recovery">Use a recovery code instead</button>
+        <button type="button" class="linkbtn" id="totp-back">Start over</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="app" class="shell hidden">
+  <aside class="rail">
+    <div class="brand">
+      <img src="assets/icon.svg?v={{VERSION}}" width="30" height="30" alt="">
+      <div><b>PBC Manager</b><small id="server-name"></small></div>
+    </div>
+    <nav class="nav" aria-label="Main">
+      <a href="#/dashboard" data-nav="dashboard">Dashboard</a>
+      <a href="#/clients" data-nav="clients">Clients</a>
+      <a href="#/jobs" data-nav="jobs">Backup jobs</a>
+      <a href="#/destinations" data-nav="destinations">Destinations</a>
+      <a href="#/activity" data-nav="activity">Activity</a>
+      <a href="#/alerts" data-nav="alerts">Alerts</a>
+      <a href="#/settings" data-nav="settings">Settings</a>
+      <a href="#/updates" data-nav="updates">Updates</a>
+      <a href="#/account" data-nav="account">Account</a>
+    </nav>
+    <div class="rail-foot">
+      <span id="version"></span>
+      <button type="button" id="logout">Sign out</button>
+    </div>
+  </aside>
+  <main class="main" id="main" tabindex="-1">
+    <div id="pending-banner"></div>
+    <div id="view"></div>
+  </main>
+</div>
+
+<dialog id="picker">
+  <div class="modal-head">
+    <h2 class="m-0" id="picker-title">Folders</h2>
+    <div class="crumb" id="picker-path"></div>
+  </div>
+  <div class="modal-body"><ul class="dirs" id="picker-list"></ul></div>
+  <div class="modal-foot">
+    <button class="btn" type="button" id="picker-cancel">Close</button>
+    <button class="btn primary hidden" type="button" id="picker-choose">Use this folder</button>
+  </div>
+</dialog>
+
+<div id="fatal" class="hidden"></div>
+<div id="toasts" aria-live="polite"></div>
+</body>
+</html>

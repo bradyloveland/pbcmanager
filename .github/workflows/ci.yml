@@ -1,0 +1,251 @@
+name: CI
+
+on:
+  push:
+    branches: [main, v2]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Formatting
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - name: Vet
+        run: go vet ./...
+      - name: Staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+      - name: Tests
+        run: go test -race ./...
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck -x install.sh uninstall.sh scripts/*.sh internal/clients/setup.sh
+
+  clients:
+    # Sets up real Debian 12/13 and Ubuntu machines (containers with an SSH
+    # server) as clients: installs proxmox-backup-client from Proxmox, creates
+    # the pbcm account and sudo rule, browses, repairs and uninstalls.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {image: "debian:trixie", user: root}
+          - {image: "debian:bookworm", user: root}
+          - {image: "ubuntu:24.04", user: alice, extra: sudo, expect: "static build"}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Start the client container
+        env:
+          IMAGE: ${{ matrix.image }}
+          EXTRA: ${{ matrix.extra }}
+          SETUP_USER: ${{ matrix.user }}
+        run: |
+          docker run -d --name client -p 127.0.0.1:2222:22 -e EXTRA -e SETUP_USER "$IMAGE" bash -c '
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -q
+            apt-get install -y -q --no-install-recommends openssh-server systemd $EXTRA
+            mkdir -p /run/sshd
+            echo "root:ci-root-password" | chpasswd
+            sed -i "s/^#\?PermitRootLogin.*/PermitRootLogin yes/" /etc/ssh/sshd_config
+            if [ "$SETUP_USER" != root ]; then
+              useradd -m -s /bin/bash "$SETUP_USER"
+              echo "$SETUP_USER:ci-root-password" | chpasswd
+              usermod -aG sudo "$SETUP_USER"
+            fi
+            exec /usr/sbin/sshd -D -e'
+          for i in $(seq 1 120); do
+            if ssh-keyscan -p 2222 127.0.0.1 >/dev/null 2>&1; then echo "SSH is up"; exit 0; fi
+            sleep 2
+          done
+          docker logs client; exit 1
+      - name: Set up the client
+        env:
+          PBCM_IT_ADDR: 127.0.0.1:2222
+          PBCM_IT_USER: ${{ matrix.user }}
+          PBCM_IT_PASSWORD: ci-root-password
+          PBCM_IT_EXPECT: ${{ matrix.expect }}
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$RUNNER_TEMP/pbcm-runner" ./cmd/pbcm-runner
+          PBCM_IT_RUNNER="$RUNNER_TEMP/pbcm-runner" go test -count=1 -v -run TestRealClient ./internal/clients/
+      - name: Container log
+        if: failure()
+        run: docker logs client | tail -50
+
+  e2e:
+    # A real backup: a client container and a Proxmox Backup Server container,
+    # both booting systemd, with the real proxmox-backup-client in between.
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build systemd images for PBS and a client
+        run: |
+          mkdir -p /tmp/img/pbs /tmp/img/client
+          cat > /tmp/img/pbs/Dockerfile <<'EOF'
+          FROM debian:trixie
+          ENV DEBIAN_FRONTEND=noninteractive
+          RUN apt-get update && apt-get install -y --no-install-recommends systemd systemd-sysv ca-certificates curl \
+           && curl -fsSL https://enterprise.proxmox.com/debian/proxmox-archive-keyring-trixie.gpg -o /usr/share/keyrings/proxmox-archive-keyring.gpg \
+           && echo "deb [signed-by=/usr/share/keyrings/proxmox-archive-keyring.gpg] http://download.proxmox.com/debian/pbs trixie pbs-no-subscription" > /etc/apt/sources.list.d/pbs.list \
+           && apt-get update && apt-get install -y --no-install-recommends proxmox-backup-server
+          CMD ["/sbin/init"]
+          EOF
+          cat > /tmp/img/client/Dockerfile <<'EOF'
+          FROM debian:bookworm
+          ENV DEBIAN_FRONTEND=noninteractive
+          RUN apt-get update && apt-get install -y --no-install-recommends systemd systemd-sysv dbus openssh-server \
+           && echo "root:ci-root-password" | chpasswd \
+           && sed -i "s/^#\?PermitRootLogin.*/PermitRootLogin yes/" /etc/ssh/sshd_config && systemctl enable ssh
+          CMD ["/sbin/init"]
+          EOF
+          docker build -q -t pbcm-pbs /tmp/img/pbs
+          docker build -q -t pbcm-client /tmp/img/client
+      - name: Start the containers
+        run: |
+          docker network create pbcm-e2e
+          for c in pbs client; do
+            docker run -d --name $c --hostname $c --network pbcm-e2e --privileged --cgroupns=host \
+              -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock pbcm-$c
+          done
+          # PBS creates its keys when its services first start; wait for both.
+          for i in $(seq 1 90); do
+            if docker exec pbs systemctl is-active --quiet proxmox-backup proxmox-backup-proxy &&
+               docker exec pbs test -f /etc/proxmox-backup/authkey.key; then
+              echo "PBS is up"; break
+            fi
+            sleep 2
+          done
+          docker exec pbs systemctl --no-pager status proxmox-backup proxmox-backup-proxy | head -20 || true
+          docker exec pbs test -f /etc/proxmox-backup/authkey.key
+      - name: Set up PBS (datastore, user, token, permissions)
+        run: |
+          docker exec pbs mkdir -p /datastore
+          docker exec pbs proxmox-backup-manager datastore create store /datastore
+          docker exec pbs proxmox-backup-manager user create ci@pbs
+          # generate-token prints JSON containing "value": "<secret>".
+          secret=$(docker exec pbs proxmox-backup-manager user generate-token ci@pbs ci |
+            python3 -c 'import re,sys; print(re.search(r"\"value\"\s*:\s*\"([^\"]+)\"", sys.stdin.read()).group(1))')
+          echo "::add-mask::$secret"
+          docker exec pbs proxmox-backup-manager acl update /datastore/store DatastoreBackup --auth-id 'ci@pbs!ci'
+          docker exec pbs proxmox-backup-manager acl update /datastore/store DatastoreBackup --auth-id ci@pbs
+          fp=$(docker exec pbs proxmox-backup-manager cert info | sed -n 's/^Fingerprint (sha256): //p')
+          ip() { docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$1"; }
+          {
+            echo "PBCM_E2E_TOKEN_SECRET=$secret"
+            echo "PBCM_E2E_FINGERPRINT=$fp"
+            echo "PBCM_E2E_PBS=$(ip pbs)"
+            echo "PBCM_E2E_CLIENT=$(ip client)"
+          } >> "$GITHUB_ENV"
+      - name: Install proxmox-backup-client on the runner (the server's own copy)
+        run: |
+          curl -fsSL https://enterprise.proxmox.com/debian/proxmox-archive-keyring-trixie.gpg | sudo tee /usr/share/keyrings/proxmox-archive-keyring.gpg >/dev/null
+          echo "deb [signed-by=/usr/share/keyrings/proxmox-archive-keyring.gpg] http://download.proxmox.com/debian/pbs-client bookworm main" | sudo tee /etc/apt/sources.list.d/pbs-client.list
+          sudo apt-get update -q && sudo apt-get install -y -q proxmox-backup-client-static
+      - name: Back up for real
+        env:
+          PBCM_E2E_ROOT_PASSWORD: ci-root-password
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$RUNNER_TEMP/pbcm-runner" ./cmd/pbcm-runner
+          PBCM_E2E_RUNNER="$RUNNER_TEMP/pbcm-runner" go test -count=1 -v -timeout 30m -run TestEndToEnd ./internal/clients/
+      - name: Container logs
+        if: failure()
+        run: |
+          docker exec client journalctl --no-pager -n 80 || true
+          docker exec pbs journalctl --no-pager -n 40 -u proxmox-backup-proxy || true
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build release archives
+        run: make dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  install:
+    # Installs the real package with systemd, checks it serves, upgrades it in
+    # place and removes it again.
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Unpack
+        run: |
+          cd dist && sha256sum -c SHA256SUMS
+          tar -xzf pbcm-*-linux-amd64.tar.gz
+      - name: Install
+        run: |
+          cd dist/pbcm-*-linux-amd64
+          sudo ./install.sh --skip-client | tee install.log
+          grep -q "Setup code:" install.log
+          test -x /opt/pbcm/pbcm-runner
+      - name: Serves HTTPS and asks for setup
+        run: |
+          curl -fsk https://127.0.0.1:8099/api/health
+          curl -fsk https://127.0.0.1:8099/api/session | grep -q '"setup_needed":true'
+          code=$(sudo pbcm setup-code)
+          curl -fsk https://127.0.0.1:8099/api/setup -H 'X-PBCM: 1' -H 'Content-Type: application/json' \
+            -d "{\"code\":\"$code\",\"username\":\"admin\",\"password\":\"ci-password-123\"}" | grep -q '"user":"admin"'
+          systemctl show -p User --value pbcm | grep -qx pbcm
+          test "$(sudo stat -c %U /var/lib/pbcm/pbcm.db)" = pbcm
+      - name: Upgrade in place keeps settings
+        run: |
+          cd dist/pbcm-*-linux-amd64
+          sudo ./install.sh --skip-client --port 9443 | tee upgrade.log
+          if grep -q "Setup code:" upgrade.log; then echo "setup code shown again after setup"; exit 1; fi
+          curl -fsk https://127.0.0.1:9443/api/session | grep -q '"setup_needed":false'
+      - name: Uninstall
+        run: |
+          cd dist/pbcm-*-linux-amd64
+          sudo ./uninstall.sh --purge
+          if systemctl is-active --quiet pbcm; then echo "service still running"; exit 1; fi
+          if id pbcm 2>/dev/null; then echo "account still there"; exit 1; fi
+          test ! -e /var/lib/pbcm
+          test ! -e /opt/pbcm
+      - name: Service log
+        if: failure()
+        run: sudo journalctl -u pbcm --no-pager -n 100
+
+  update:
+    # Updates from the web UI on a real systemd machine: install, update,
+    # roll back by hand, and roll back automatically from a build that
+    # doesn't start. Uses a throwaway signing key made by the test.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Update and roll back
+        run: scripts/ci-update-test.sh
+      - name: Service log
+        if: failure()
+        run: |
+          sudo journalctl -u pbcm --no-pager -n 150
+          sudo cat /var/lib/pbcm/update.json || true

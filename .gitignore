@@ -1,9 +1,5 @@
-__pycache__/
-*.pyc
-.venv/
-.pytest_cache/
-.coverage
-htmlcov/
-dist/
-*.tar.gz
+/dist/
+/bin/
 /tmp/
+*.test
+coverage.out
