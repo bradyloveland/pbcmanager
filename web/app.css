@@ -187,6 +187,44 @@ tr.clickable:hover td{background:var(--surface-2)}
 .cols{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:18px;align-items:start}
 .stack > * + *{margin-top:18px}
 
+/* Job ledger: the run-history strip */
+.ledger{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden}
+.ledger-head,.jobrow{display:grid;grid-template-columns:minmax(170px,1.3fr) minmax(200px,1.3fr) minmax(140px,1fr) minmax(130px,.9fr) 104px;gap:18px;align-items:center;padding:14px 20px}
+.ledger-head{font-size:12.5px;color:var(--muted);border-bottom:1px solid var(--line);padding-top:11px;padding-bottom:11px;background:var(--surface-2)}
+.jobrow + .jobrow{border-top:1px solid var(--line)}
+.jobrow.paused{opacity:.62}
+.tape{display:flex;gap:3px;align-items:flex-end;height:30px}
+.tape a,.tape span{display:block;width:9px;height:24px;border-radius:2px;background:var(--idle);opacity:.45}
+.tape .success{background:var(--ok);opacity:1}
+.tape .failed{background:var(--bad);opacity:1;height:30px}
+.tape .cancelled{background:var(--warn);opacity:.85}
+.tape .running{background:var(--accent);opacity:1;animation:pulse 1.4s ease-in-out infinite}
+.tape a:hover{outline:2px solid var(--ink);outline-offset:1px}
+@keyframes pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion: reduce){.tape .running{animation:none}}
+.state{display:flex;flex-direction:column;font-size:14px}
+.state b{font-weight:600}
+.state.success b{color:var(--ok)} .state.failed b{color:var(--bad)} .state.running b{color:var(--accent)} .state.cancelled b{color:var(--warn)}
+td .summary{color:var(--muted);font-size:13px;max-width:52ch;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+
+/* Job form */
+.share{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(120px,210px) auto;gap:8px;align-items:center}
+.share-head{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(120px,210px) auto;gap:8px;font-size:12.5px;color:var(--muted)}
+.shares{display:flex;flex-direction:column;gap:10px}
+.iconbtn{background:none;border:1px solid transparent;border-radius:var(--r-sm);width:34px;height:34px;cursor:pointer;color:var(--muted);font-size:18px;line-height:1}
+.iconbtn:hover{border-color:var(--line);color:var(--bad)}
+.days{display:flex;gap:6px;flex-wrap:wrap}
+.days label{border:1px solid var(--line);border-radius:var(--r-sm);padding:5px 10px;cursor:pointer;font-size:13.5px}
+.days input{position:absolute;opacity:0;pointer-events:none}
+.days label:has(input:checked){background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600}
+.days label:has(input:focus-visible){outline:3px solid var(--focus)}
+details.adv > summary{cursor:pointer;font-weight:600;color:var(--accent);margin-bottom:4px}
+details.adv[open] > summary{margin-bottom:16px}
+.meter{height:10px;border-radius:5px;background:var(--surface-2);border:1px solid var(--line);overflow:hidden;margin-top:8px}
+.meter i{display:block;height:100%;background:var(--ok);border-radius:5px 0 0 5px}
+.meter.warn i{background:var(--warn)} .meter.bad i{background:var(--bad)}
+.pill.idle{background:var(--surface-2);color:var(--muted)}
+
 /* Live log */
 .log{background:#0F1720;color:#D5DEE6;font-family:var(--mono);font-size:12.8px;line-height:1.55;border-radius:var(--r-lg);padding:16px 18px;max-height:min(56vh,560px);min-height:120px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:12px 0 0}
 .log .err{color:#FF978C}
@@ -224,6 +262,15 @@ dialog::backdrop{background:rgba(10,18,26,.5)}
   .enroll{grid-template-columns:1fr}
   .cols{grid-template-columns:1fr}
 }
+/* The ledger stacks by its own width, since the sidebar takes part of the window. */
+.ledger{container-type:inline-size}
+@container (max-width: 880px){
+  .ledger-head{display:none}
+  .jobrow{grid-template-columns:1fr auto;grid-template-areas:"name run" "tape tape" "state next";gap:10px 16px}
+  .jobrow > :nth-child(1){grid-area:name} .jobrow > :nth-child(2){grid-area:tape}
+  .jobrow > :nth-child(3){grid-area:state} .jobrow > :nth-child(4){grid-area:next}
+  .jobrow > :nth-child(5){grid-area:run}
+}
 @media (max-width:760px){
   .shell{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 1fr}
   .rail{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;align-content:flex-start;padding:12px 14px;gap:8px}
@@ -234,5 +281,7 @@ dialog::backdrop{background:rgba(10,18,26,.5)}
   .rail-foot{margin:0 0 0 auto;flex-direction:row;gap:14px}
   .rail-foot span{display:none}
   .formgrid{grid-template-columns:1fr}
+  .share,.share-head{grid-template-columns:1fr auto}
+  .share-head{display:none}
   h1{font-size:23px}
 }

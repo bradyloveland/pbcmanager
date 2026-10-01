@@ -128,7 +128,7 @@ func cmdServe(args []string) error {
 		return err
 	}
 	defer st.Close()
-	srv, err := server.New(server.Options{ConfigDir: d.config, Store: st, RunnerPath: os.Getenv("PBCM_RUNNER")})
+	srv, err := server.New(server.Options{ConfigDir: d.config, DataDir: d.data, Store: st, RunnerPath: os.Getenv("PBCM_RUNNER")})
 	if err != nil {
 		return err
 	}

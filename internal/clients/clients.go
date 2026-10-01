@@ -10,9 +10,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -38,15 +40,21 @@ type Manager struct {
 	timeout    time.Duration
 	tasks      tasks
 
-	busyMu sync.Mutex
-	busy   map[string]bool
+	busyMu   sync.Mutex
+	busy     map[string]bool
+	syncMus  map[string]*sync.Mutex
+	nextSync map[string]time.Time
+
+	// Sync configures keeping clients in step (see sync.go).
+	Sync SyncConfig
 }
 
 // New returns a manager. runnerPath is the pbcm-runner executable to send
 // to clients (linux/amd64).
 func New(st *store.Store, id *sshx.Identity, runnerPath string) *Manager {
 	return &Manager{store: st, identity: id, runnerPath: runnerPath, timeout: 15 * time.Second,
-		tasks: tasks{items: map[string]*Task{}}, busy: map[string]bool{}}
+		tasks: tasks{items: map[string]*Task{}}, busy: map[string]bool{},
+		Sync: SyncConfig{ActiveEvery: 30 * time.Second, IdleEvery: 5 * time.Minute}}
 }
 
 // Identity returns the server's SSH key.
@@ -359,6 +367,11 @@ func orNone(s string) string {
 
 // runnerCommand signs in as pbcm and runs a pbcm-runner command.
 func (m *Manager) runnerCommand(ctx context.Context, c *store.Client, words ...string) (string, error) {
+	return m.runnerCommandInput(ctx, c, nil, words...)
+}
+
+// runnerCommandInput is runnerCommand with data on the command's stdin.
+func (m *Manager) runnerCommandInput(ctx context.Context, c *store.Client, stdin io.Reader, words ...string) (string, error) {
 	key, err := sshx.ParseKey(c.HostKey)
 	if err != nil {
 		return "", err
@@ -369,7 +382,7 @@ func (m *Manager) runnerCommand(ctx context.Context, c *store.Client, words ...s
 		return "", err
 	}
 	defer conn.Close()
-	stdout, stderr, code, err := sshx.Output(conn, sshx.Join(words...), nil)
+	stdout, stderr, code, err := sshx.Output(conn, sshx.Join(words...), stdin)
 	if err != nil {
 		return "", err
 	}
@@ -467,8 +480,12 @@ func (m *Manager) Remove(ctx context.Context, id string, uninstall, keepHistory 
 			return "", fmt.Errorf("couldn't clean up %s: %s. Fix the connection, or remove it from this list only", c.Name, err)
 		}
 	}
-	if err := m.store.DeleteClient(id); err != nil {
+	if err := m.store.DeleteClient(id); err != nil { // its jobs go with it
 		return "", err
+	}
+	_ = m.store.DeleteClientRuns(id)
+	if m.Sync.LogDir != "" {
+		os.RemoveAll(filepath.Join(m.Sync.LogDir, id))
 	}
 	slog.Info("client removed", "client", c.Name, "uninstalled", uninstall)
 	return out, nil

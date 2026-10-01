@@ -80,7 +80,12 @@ func newEnv(t *testing.T, n *config.Network, withAdmin bool) *env {
 
 func (e *env) start() {
 	e.t.Helper()
-	srv, err := New(Options{ConfigDir: e.dir, Store: e.st, FailDelay: time.Millisecond, ConfirmWindow: e.window, Hostname: "nas"})
+	runner := filepath.Join(e.dir, "pbcm-runner")
+	if _, err := os.Stat(runner); err != nil {
+		os.WriteFile(runner, []byte("RUNNER"), 0o755)
+	}
+	srv, err := New(Options{ConfigDir: e.dir, DataDir: e.dir, Store: e.st, FailDelay: time.Millisecond, ConfirmWindow: e.window,
+		Hostname: "nas", RunnerPath: runner})
 	if err != nil {
 		e.t.Fatal(err)
 	}

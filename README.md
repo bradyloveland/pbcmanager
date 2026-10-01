@@ -19,7 +19,8 @@ The full plan is in [docs/design-v2.md](docs/design-v2.md).
 | --- | --- |
 | M1: server base: sign-in with two-step verification, setup in the browser, Settings page (including network and HTTPS with confirm-or-undo), installer, CI | **Done** |
 | M2: clients over SSH: add as root once, automatic `proxmox-backup-client` install, limited `pbcm` account, host key pinning, folder browser, repair and remove | **Done** |
-| M3: backups | Next |
+| M3a: backups: destinations, jobs with several destinations, schedules on each client, Run now, cancel, live logs, run history, snapshots | **Done** |
+| M3b: email alerts (failures, missed backups, unreachable clients) | Next |
 | M4: dashboard | |
 | M5: updates from the browser | |
 | M6: moving from 1.x, docs, 2.0.0 release | |

@@ -37,6 +37,7 @@ type Group struct {
 var Groups = []Group{
 	{"general", "General"},
 	{"security", "Sign-in and sessions"},
+	{"history", "Run history"},
 }
 
 // Defs lists every setting. New milestones add theirs here, and the Settings
@@ -48,6 +49,15 @@ var Defs = []Def{
 	{Key: "security.session_hours", Group: "security", Label: "Sign out after inactivity",
 		Help: "How long a signed-in browser stays signed in without being used.",
 		Type: "int", Unit: "hours", Min: 1, Max: 720, Default: 12},
+	{Key: "history.client_runs", Group: "history", Label: "Runs kept on each client",
+		Help: "Each client keeps this many of its most recent runs and their logs, so nothing is lost while this server is down.",
+		Type: "int", Unit: "runs", Min: 20, Max: 10000, Default: 500},
+	{Key: "history.client_days", Group: "history", Label: "Days kept on each client",
+		Help: "Runs older than this are removed from clients, however many there are.",
+		Type: "int", Unit: "days", Min: 7, Max: 3650, Default: 90},
+	{Key: "history.server_runs", Group: "history", Label: "Runs kept on this server",
+		Help: "Across all clients. The oldest runs and their logs are removed first.",
+		Type: "int", Unit: "runs", Min: 100, Max: 100000, Default: 5000},
 }
 
 // Lookup returns the definition for key.

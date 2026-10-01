@@ -3,238 +3,32 @@ package clients
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/bradyloveland/pbcmanager/internal/bundle"
+	"github.com/bradyloveland/pbcmanager/internal/clients/clienttest"
 	"github.com/bradyloveland/pbcmanager/internal/runner"
 	"github.com/bradyloveland/pbcmanager/internal/secret"
 	"github.com/bradyloveland/pbcmanager/internal/sshx"
 	"github.com/bradyloveland/pbcmanager/internal/store"
 )
 
-// fakeHost is an SSH server that behaves like a Debian machine just enough
-// for setup: root and a sudo user sign in with passwords, setup "installs"
-// the pbcm account, and pbcm then signs in with the server's key and gets
-// pbcm-runner answers.
-type fakeHost struct {
-	t        *testing.T
-	ln       net.Listener
-	mu       sync.Mutex
-	hostKey  ssh.Signer
-	execs    []execRecord
-	files    map[string][]byte
-	pbcmKey  ssh.PublicKey // authorized for pbcm once setup ran
-	rootKey  ssh.PublicKey // authorized for root, if set
-	failWith string        // make setup.sh print this ERROR line
-	removed  bool
-}
-
-type execRecord struct {
-	user, cmd string
-	stdin     []byte
-}
-
 const (
-	rootPW  = "root-secret-pw"
-	alicePW = "alice-secret-pw"
-	tmpDir  = "/tmp/pbcm-setup.Ab12Cd34"
+	rootPW  = clienttest.RootPassword
+	alicePW = clienttest.AlicePassword
+	tmpDir  = clienttest.TmpDir
 )
-
-func newSigner(t *testing.T) ssh.Signer {
-	_, priv, _ := ed25519.GenerateKey(rand.Reader)
-	s, err := ssh.NewSignerFromKey(priv)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s
-}
-
-func newFakeHost(t *testing.T) *fakeHost {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := &fakeHost{t: t, ln: ln, hostKey: newSigner(t), files: map[string][]byte{}}
-	t.Cleanup(func() { ln.Close() })
-	go h.serve()
-	return h
-}
-
-func (h *fakeHost) port() int { return h.ln.Addr().(*net.TCPAddr).Port }
-
-func (h *fakeHost) setHostKey(s ssh.Signer) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.hostKey = s
-}
-
-func (h *fakeHost) file(path string) []byte {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.files[path]
-}
-
-func (h *fakeHost) wasRemoved() bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.removed
-}
-
-func (h *fakeHost) records() []execRecord {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return append([]execRecord{}, h.execs...)
-}
-
-func (h *fakeHost) serve() {
-	for {
-		conn, err := h.ln.Accept()
-		if err != nil {
-			return
-		}
-		go h.handle(conn)
-	}
-}
-
-func (h *fakeHost) handle(nc net.Conn) {
-	h.mu.Lock()
-	hostKey := h.hostKey
-	h.mu.Unlock()
-	cfg := &ssh.ServerConfig{
-		PasswordCallback: func(m ssh.ConnMetadata, pw []byte) (*ssh.Permissions, error) {
-			if (m.User() == "root" && string(pw) == rootPW) || (m.User() == "alice" && string(pw) == alicePW) {
-				return nil, nil
-			}
-			return nil, fmt.Errorf("denied")
-		},
-		PublicKeyCallback: func(m ssh.ConnMetadata, k ssh.PublicKey) (*ssh.Permissions, error) {
-			h.mu.Lock()
-			defer h.mu.Unlock()
-			if m.User() == runner.Account && h.pbcmKey != nil && bytes.Equal(k.Marshal(), h.pbcmKey.Marshal()) {
-				return nil, nil
-			}
-			if m.User() == "root" && h.rootKey != nil && bytes.Equal(k.Marshal(), h.rootKey.Marshal()) {
-				return nil, nil
-			}
-			return nil, fmt.Errorf("denied")
-		},
-	}
-	cfg.AddHostKey(hostKey)
-	sc, chans, reqs, err := ssh.NewServerConn(nc, cfg)
-	if err != nil {
-		return
-	}
-	defer sc.Close()
-	go ssh.DiscardRequests(reqs)
-	for nch := range chans {
-		ch, creqs, err := nch.Accept()
-		if err != nil {
-			continue
-		}
-		go func() {
-			defer ch.Close()
-			for req := range creqs {
-				if req.Type != "exec" {
-					req.Reply(false, nil)
-					continue
-				}
-				var p struct{ Cmd string }
-				ssh.Unmarshal(req.Payload, &p)
-				req.Reply(true, nil)
-				stdin, _ := io.ReadAll(ch)
-				out, errOut, code := h.exec(sc.User(), p.Cmd, stdin)
-				io.WriteString(ch, out)
-				io.WriteString(ch.Stderr(), errOut)
-				ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{uint32(code)}))
-				return
-			}
-		}()
-	}
-}
-
-func (h *fakeHost) exec(user, cmd string, stdin []byte) (string, string, int) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.execs = append(h.execs, execRecord{user, cmd, stdin})
-	if user == runner.Account {
-		// The forced command hands everything to pbcm-runner.
-		words, err := runner.SplitWords(cmd)
-		if err != nil || len(words) == 0 {
-			return "", "Error: bad command", 2
-		}
-		switch words[0] {
-		case "detect":
-			b, _ := json.Marshal(runner.Info{OSID: "debian", OSPretty: "Debian GNU/Linux 12 (bookworm)", OSCodename: "bookworm",
-				Arch: "x86_64", Hostname: "nas", SystemdVersion: "252", ClientVersion: "3.4.1", RunnerVersion: "2.0.0-test"})
-			return string(b) + "\n", "", 0
-		case "browse":
-			b, _ := json.Marshal(runner.Listing{Path: words[1], Parent: "/", Dirs: []string{"Media", "Documents"}})
-			return string(b), "", 0
-		case "uninstall":
-			h.removed, h.pbcmKey = true, nil
-			return "Removed the sudo rule, settings and pbcm-runner.\n", "", 0
-		}
-		return "", "Error: unknown command", 2
-	}
-	switch {
-	case cmd == "id -u":
-		if user == "root" {
-			return "0\n", "", 0
-		}
-		return "1000\n", "", 0
-	case cmd == "sudo -n true":
-		return "", "sudo: a password is required\n", 1
-	case cmd == "sudo -S -p '' -v":
-		if string(stdin) == alicePW+"\n" {
-			return "", "", 0
-		}
-		return "", "Sorry, try again.\n", 1
-	case cmd == "umask 077 && mktemp -d /tmp/pbcm-setup.XXXXXXXX":
-		return tmpDir + "\n", "", 0
-	case strings.HasPrefix(cmd, "cat > "):
-		path := strings.Trim(strings.TrimPrefix(cmd, "cat > "), "'")
-		h.files[path] = stdin
-		return "", "", 0
-	case strings.HasPrefix(cmd, "rm -rf "):
-		return "", "", 0
-	case cmd == "bash "+tmpDir+"/setup.sh" || cmd == "sudo -S -p '' bash "+tmpDir+"/setup.sh":
-		if user != "root" && string(stdin) != alicePW+"\n" {
-			return "sudo: no password\n", "", 1
-		}
-		for _, f := range []string{"pbcm-runner", "key.pub", "setup.sh"} {
-			if _, ok := h.files[tmpDir+"/"+f]; !ok {
-				return "ERROR: " + f + " is missing\n", "", 1
-			}
-		}
-		if h.failWith != "" {
-			return "==> Setting up Debian\nERROR: " + h.failWith + "\n", "", 1
-		}
-		k, _, _, _, err := ssh.ParseAuthorizedKey(h.files[tmpDir+"/key.pub"])
-		if err != nil {
-			return "ERROR: bad key\n", "", 1
-		}
-		h.pbcmKey = k
-		return "==> Setting up Debian GNU/Linux 12 (bookworm) (x86_64)\n==> Setup finished\n", "", 0
-	}
-	return "", "sh: unexpected command: " + cmd + "\n", 127
-}
 
 type harness struct {
 	m    *Manager
 	st   *store.Store
-	host *fakeHost
+	host *clienttest.Host
 	dir  string
 }
 
@@ -254,11 +48,12 @@ func newHarness(t *testing.T) *harness {
 	os.WriteFile(runnerPath, []byte("RUNNER-BINARY"), 0o755)
 	m := New(st, id, runnerPath)
 	m.timeout = 5 * time.Second
-	return &harness{m: m, st: st, host: newFakeHost(t), dir: dir}
+	m.Sync.LogDir = filepath.Join(dir, "logs")
+	return &harness{m: m, st: st, host: clienttest.New(t), dir: dir}
 }
 
 func (h *harness) probe(t *testing.T) *ProbeResult {
-	res, err := h.m.Probe(context.Background(), "127.0.0.1", h.host.port())
+	res, err := h.m.Probe(context.Background(), "127.0.0.1", h.host.Port())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +76,7 @@ func wait(t *testing.T, task *Task) TaskView {
 func (h *harness) add(t *testing.T, login Login) (*store.Client, TaskView) {
 	t.Helper()
 	p := h.probe(t)
-	c, task, err := h.m.Add(AddRequest{Name: "nas", Address: "127.0.0.1", Port: h.host.port(), HostKey: p.HostKey, Login: login})
+	c, task, err := h.m.Add(AddRequest{Name: "nas", Address: "127.0.0.1", Port: h.host.Port(), HostKey: p.HostKey, Login: login})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +88,7 @@ func (h *harness) add(t *testing.T, login Login) (*store.Client, TaskView) {
 func TestProbeShowsTheHostKey(t *testing.T) {
 	h := newHarness(t)
 	res := h.probe(t)
-	if res.Fingerprint != ssh.FingerprintSHA256(h.host.hostKey.PublicKey()) || res.Type != "ssh-ed25519" {
+	if res.Fingerprint != ssh.FingerprintSHA256(h.host.HostKey()) || res.Type != "ssh-ed25519" {
 		t.Fatalf("probe: %+v", res)
 	}
 	if _, err := h.m.Probe(context.Background(), "127.0.0.1", 1); err == nil || !strings.Contains(err.Error(), "refused") {
@@ -310,11 +105,11 @@ func TestAddAsRoot(t *testing.T) {
 	if !v.OK || c.Status != store.ClientReady {
 		t.Fatalf("setup failed: %+v %v", v, c.StatusDetail)
 	}
-	if c.OSPretty != "Debian GNU/Linux 12 (bookworm)" || c.ClientVersion != "3.4.1" || c.Hostname != "nas" || c.LastContact == 0 {
+	if c.OSPretty != "Debian GNU/Linux 12 (bookworm)" || c.ClientVersion != "3.4.1" || c.Hostname == "" || c.LastContact == 0 || c.Arch != "x86_64" {
 		t.Fatalf("details not saved: %+v", c)
 	}
-	if string(h.host.file(tmpDir+"/pbcm-runner")) != "RUNNER-BINARY" || !bytes.Equal(h.host.file(tmpDir+"/setup.sh"), setupScript) ||
-		strings.TrimSpace(string(h.host.file(tmpDir+"/key.pub"))) != h.m.identity.AuthorizedKey {
+	if string(h.host.Uploaded(tmpDir+"/pbcm-runner")) != "RUNNER-BINARY" || !bytes.Equal(h.host.Uploaded(tmpDir+"/setup.sh"), setupScript) ||
+		strings.TrimSpace(string(h.host.Uploaded(tmpDir+"/key.pub"))) != h.m.identity.AuthorizedKey {
 		t.Fatal("uploaded files differ from what was sent")
 	}
 	joined := strings.Join(v.Lines, "\n")
@@ -323,7 +118,6 @@ func TestAddAsRoot(t *testing.T) {
 			t.Errorf("log missing %q:\n%s", want, joined)
 		}
 	}
-	// The password is never written anywhere.
 	raw, _ := os.ReadFile(filepath.Join(h.dir, "pbcm.db"))
 	wal, _ := os.ReadFile(filepath.Join(h.dir, "pbcm.db-wal"))
 	if bytes.Contains(raw, []byte(rootPW)) || bytes.Contains(wal, []byte(rootPW)) || strings.Contains(joined, rootPW) {
@@ -338,16 +132,14 @@ func TestSudoPasswordOnlyGoesToSudo(t *testing.T) {
 		t.Fatalf("setup failed: %+v", v)
 	}
 	sawScript := false
-	for _, r := range h.host.records() {
-		hasPW := bytes.Contains(r.stdin, []byte(alicePW))
-		isSudo := strings.HasPrefix(r.cmd, "sudo -S -p '' ")
-		if hasPW && !isSudo {
-			t.Errorf("password sent to %q", r.cmd)
+	for _, r := range h.host.Execs() {
+		if bytes.Contains(r.Stdin, []byte(alicePW)) && !strings.HasPrefix(r.Cmd, "sudo -S -p '' ") {
+			t.Errorf("password sent to %q", r.Cmd)
 		}
-		if strings.Contains(r.cmd, alicePW) {
-			t.Errorf("password on a command line: %q", r.cmd)
+		if strings.Contains(r.Cmd, alicePW) {
+			t.Errorf("password on a command line: %q", r.Cmd)
 		}
-		if r.cmd == "sudo -S -p '' bash "+tmpDir+"/setup.sh" {
+		if r.Cmd == "sudo -S -p '' bash "+tmpDir+"/setup.sh" {
 			sawScript = true
 		}
 	}
@@ -356,10 +148,10 @@ func TestSudoPasswordOnlyGoesToSudo(t *testing.T) {
 	}
 }
 
-func TestWrongSudoPassword(t *testing.T) {
+func TestWrongPassword(t *testing.T) {
 	h := newHarness(t)
 	p := h.probe(t)
-	c, task, err := h.m.Add(AddRequest{Name: "nas", Address: "127.0.0.1", Port: h.host.port(), HostKey: p.HostKey,
+	c, task, err := h.m.Add(AddRequest{Name: "nas", Address: "127.0.0.1", Port: h.host.Port(), HostKey: p.HostKey,
 		Login: Login{User: "alice", Password: "wrong"}})
 	if err != nil {
 		t.Fatal(err)
@@ -368,16 +160,15 @@ func TestWrongSudoPassword(t *testing.T) {
 	if v.OK || !strings.Contains(v.Error, "didn't accept the sign-in") {
 		t.Fatalf("wrong password: %+v", v)
 	}
-	c, _ = h.st.GetClient(c.ID)
-	if c.Status != store.ClientError {
+	if c, _ = h.st.GetClient(c.ID); c.Status != store.ClientError {
 		t.Fatalf("status %s", c.Status)
 	}
 }
 
 func TestHostKeyMustMatchWhatWasChecked(t *testing.T) {
 	h := newHarness(t)
-	other := sshx.FormatKey(newSigner(t).PublicKey())
-	c, task, err := h.m.Add(AddRequest{Name: "nas", Address: "127.0.0.1", Port: h.host.port(), HostKey: other,
+	other := sshx.FormatKey(clienttest.NewSigner(t).PublicKey())
+	c, task, err := h.m.Add(AddRequest{Name: "nas", Address: "127.0.0.1", Port: h.host.Port(), HostKey: other,
 		Login: Login{User: "root", Password: rootPW}})
 	if err != nil {
 		t.Fatal(err)
@@ -386,27 +177,26 @@ func TestHostKeyMustMatchWhatWasChecked(t *testing.T) {
 	if v.OK || !strings.Contains(v.Error, "isn't the one you checked") {
 		t.Fatalf("expected host key refusal: %+v", v)
 	}
-	for _, r := range h.host.records() {
-		t.Errorf("nothing should run on an unverified host, ran %q", r.cmd)
+	for _, r := range h.host.Execs() {
+		t.Errorf("nothing should run on an unverified host, ran %q", r.Cmd)
 	}
-	c, _ = h.st.GetClient(c.ID)
-	if c.Status != store.ClientError {
+	if c, _ = h.st.GetClient(c.ID); c.Status != store.ClientError {
 		t.Fatalf("status %s", c.Status)
 	}
 }
 
 func TestSetupErrorIsReported(t *testing.T) {
 	h := newHarness(t)
-	h.host.failWith = "proxmox-backup-client is only made for x86-64 machines, and this one is aarch64."
+	h.host.FailSetupWith("Ubuntu 20.04 LTS isn't supported. Clients need Debian 12 or 13.")
 	c, v := h.add(t, Login{User: "root", Password: rootPW})
-	if v.OK || c.Status != store.ClientError || !strings.Contains(c.StatusDetail, "only made for x86-64") {
+	if v.OK || c.Status != store.ClientError || !strings.Contains(c.StatusDetail, "isn't supported") {
 		t.Fatalf("got %+v / %s", v, c.StatusDetail)
 	}
 }
 
 func TestSignInWithServerKey(t *testing.T) {
 	h := newHarness(t)
-	h.host.rootKey = h.m.identity.Signer.PublicKey()
+	h.host.AuthorizeRootKey(h.m.identity.Signer.PublicKey())
 	c, v := h.add(t, Login{User: "root", UseKey: true})
 	if !v.OK || c.Status != store.ClientReady {
 		t.Fatalf("key sign-in setup failed: %+v", v)
@@ -421,7 +211,7 @@ func TestDuplicatesAndBadInput(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "already a client called") {
 		t.Fatalf("duplicate name: %v", err)
 	}
-	_, _, err = h.m.Add(AddRequest{Name: "other", Address: "127.0.0.1", Port: h.host.port(), HostKey: p.HostKey, Login: Login{Password: "x"}})
+	_, _, err = h.m.Add(AddRequest{Name: "other", Address: "127.0.0.1", Port: h.host.Port(), HostKey: p.HostKey, Login: Login{Password: "x"}})
 	if err == nil || !strings.Contains(err.Error(), "already been added") {
 		t.Fatalf("duplicate address: %v", err)
 	}
@@ -435,19 +225,25 @@ func TestCheckBrowseHostKeyChangeRepairAndRemove(t *testing.T) {
 	h := newHarness(t)
 	c, _ := h.add(t, Login{User: "root", Password: rootPW})
 	ctx := context.Background()
+	h.host.Mkdir("/srv/My Files/Media")
+	h.host.Mkdir("/srv/My Files/Documents")
 
 	l, err := h.m.Browse(ctx, c.ID, "/srv/My Files")
-	if err != nil || l.Path != "/srv/My Files" || len(l.Dirs) != 2 {
+	if err != nil || l.Path != "/srv/My Files" || strings.Join(l.Dirs, ",") != "Documents,Media" {
 		t.Fatalf("browse: %+v %v", l, err)
 	}
-	last := h.host.records()[len(h.host.records())-1]
-	if last.user != "pbcm" || last.cmd != "browse '/srv/My Files'" {
-		t.Fatalf("browse ran %q as %s", last.cmd, last.user)
+	execs := h.host.Execs()
+	if last := execs[len(execs)-1]; last.User != "pbcm" || last.Cmd != "browse '/srv/My Files'" {
+		t.Fatalf("browse ran %q as %s", last.Cmd, last.User)
+	}
+	// The pbcm key only reaches pbcm-runner.
+	if _, err := h.m.runnerCommand(ctx, c, "cat", "/etc/shadow"); err == nil || !strings.Contains(err.Error(), "unknown command") {
+		t.Fatalf("other commands must be refused: %v", err)
 	}
 
 	// The client is reinstalled: it now has a new host key.
-	newKey := newSigner(t)
-	h.host.setHostKey(newKey)
+	newKey := clienttest.NewSigner(t)
+	h.host.SetHostKey(newKey)
 	c, err = h.m.Check(ctx, c.ID)
 	if err == nil || c.Status != store.ClientHostKeyChanged || c.OfferedKey != sshx.FormatKey(newKey.PublicKey()) {
 		t.Fatalf("check after key change: %v %+v", err, c)
@@ -455,8 +251,6 @@ func TestCheckBrowseHostKeyChangeRepairAndRemove(t *testing.T) {
 	if _, err := h.m.Browse(ctx, c.ID, "/srv"); err == nil {
 		t.Fatal("must not talk to a host whose key changed")
 	}
-
-	// Repair with the new key the user checked.
 	task, err := h.m.Repair(c.ID, Login{User: "root", Password: rootPW}, c.OfferedKey)
 	if err != nil {
 		t.Fatal(err)
@@ -470,18 +264,21 @@ func TestCheckBrowseHostKeyChangeRepairAndRemove(t *testing.T) {
 	}
 
 	out, err := h.m.Remove(ctx, c.ID, true, false)
-	if err != nil || !strings.Contains(out, "Removed") || !h.host.wasRemoved() {
+	if err != nil || !strings.Contains(out, "Removed") {
 		t.Fatalf("remove: %q %v", out, err)
 	}
 	if _, err := h.st.GetClient(c.ID); err != store.ErrNotFound {
 		t.Fatal("client should be deleted")
+	}
+	if _, err := h.m.runnerCommand(ctx, c, "detect"); err == nil {
+		t.Fatal("the server's key should no longer work after uninstall")
 	}
 }
 
 func TestRemoveUnreachableNeedsListOnly(t *testing.T) {
 	h := newHarness(t)
 	c, _ := h.add(t, Login{User: "root", Password: rootPW})
-	h.host.ln.Close()
+	h.host.Close()
 	if _, err := h.m.Remove(context.Background(), c.ID, true, false); err == nil || !strings.Contains(err.Error(), "remove it from this list only") {
 		t.Fatalf("expected advice to remove from list only: %v", err)
 	}
@@ -501,5 +298,147 @@ func TestTaskLogSplitsLines(t *testing.T) {
 	}
 	if got := task.View(2); len(got.Lines) != 1 || got.Lines[0] != "three" {
 		t.Fatalf("offset view: %+v", got)
+	}
+}
+
+// ---------------------------------------------------------------- backups
+
+func (h *harness) jobSetup(t *testing.T, folder string) (*store.Client, *store.Job) {
+	t.Helper()
+	c, v := h.add(t, Login{User: "root", Password: rootPW})
+	if !v.OK {
+		t.Fatalf("setup: %+v", v)
+	}
+	d := &store.Destination{ID: "d1", Name: "Home PBS", Host: "192.0.2.10", Port: 8007, Datastore: "store",
+		Username: "nas@pbs", TokenName: "nas", Secret: "token-secret"}
+	if err := h.st.SaveDestination(d); err != nil {
+		t.Fatal(err)
+	}
+	h.host.Mkdir(folder)
+	j := &store.Job{ID: "j1", ClientID: c.ID, Name: "media", BackupID: "nas", Shares: []bundle.Share{{Path: folder, Archive: "media"}},
+		Schedule: bundle.Schedule{Type: "daily", Time: "02:00", Days: []int{0, 1, 2, 3, 4, 5, 6}}, ChangeDetection: "metadata",
+		Enabled: true, Destinations: []string{"d1"}}
+	if err := h.st.SaveJob(j); err != nil {
+		t.Fatal(err)
+	}
+	return c, j
+}
+
+func TestApplyRunCollectAndLog(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	c, j := h.jobSetup(t, "/srv/media")
+	if !h.m.Pending(c) {
+		t.Fatal("a new job should be pending")
+	}
+	if err := h.m.Apply(ctx, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	c, _ = h.st.GetClient(c.ID)
+	if h.m.Pending(c) || c.ApplyError != "" {
+		t.Fatalf("after apply: pending=%v err=%q", h.m.Pending(c), c.ApplyError)
+	}
+	if timer, err := os.ReadFile(h.host.Path("/etc/systemd/system/pbcm-job-j1.timer")); err != nil || !strings.Contains(string(timer), "OnCalendar=*-*-* 02:00:00") {
+		t.Fatalf("timer on client: %s %v", timer, err)
+	}
+	if bundleJSON, _ := os.ReadFile(h.host.Path(runner.BundleFile)); bytes.Contains(bundleJSON, []byte("token-secret")) {
+		t.Fatal("the client's bundle.json must not hold secrets")
+	}
+
+	if err := h.m.StartJob(ctx, j.ID); err != nil {
+		t.Fatal(err)
+	}
+	h.host.WaitIdle()
+	finished, err := h.m.SyncClient(ctx, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(finished) != 1 || finished[0].Status != bundle.Success || finished[0].Trigger != "manual" || finished[0].DestinationName != "Home PBS" {
+		t.Fatalf("finished runs: %+v", finished)
+	}
+	r, _ := h.st.GetRun(c.ID, finished[0].ID)
+	if !r.LogSaved {
+		t.Fatal("finished log should be saved on the server")
+	}
+	chunk, err := h.m.RunLog(ctx, c.ID, r.ID, 0)
+	if err != nil || !chunk.Done || !strings.Contains(chunk.Text, "repo=nas@pbs!nas@192.0.2.10:8007:store") || !strings.Contains(chunk.Text, "media.pxar:/srv/media") {
+		t.Fatalf("log: %+v %v", chunk, err)
+	}
+	// Collecting again reports nothing new.
+	if again, err := h.m.SyncClient(ctx, c.ID); err != nil || len(again) != 0 {
+		t.Fatalf("second sync: %v %v", again, err)
+	}
+
+	// A changed job is sent again on the next check.
+	j.Schedule = bundle.Schedule{Type: "manual"}
+	h.st.SaveJob(j)
+	c, _ = h.st.GetClient(c.ID)
+	if !h.m.Pending(c) {
+		t.Fatal("changed job should be pending")
+	}
+	h.m.SyncClient(ctx, c.ID)
+	c, _ = h.st.GetClient(c.ID)
+	if h.m.Pending(c) {
+		t.Fatal("sync should send pending settings")
+	}
+	if _, err := os.Stat(h.host.Path("/etc/systemd/system/pbcm-job-j1.timer")); err == nil {
+		t.Fatal("manual job's timer should be gone")
+	}
+}
+
+func TestFailedAndCancelledRuns(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	c, j := h.jobSetup(t, "/srv/fail")
+	if err := h.m.StartJob(ctx, j.ID); err != nil { // sends the pending settings first
+		t.Fatal(err)
+	}
+	h.host.WaitIdle()
+	finished, _ := h.m.SyncClient(ctx, c.ID)
+	if len(finished) != 1 || finished[0].Status != bundle.Failed || finished[0].Summary != "Error: connection refused" {
+		t.Fatalf("failed run: %+v", finished)
+	}
+
+	j.Shares = []bundle.Share{{Path: "/srv/slow", Archive: "slow"}}
+	h.host.Mkdir("/srv/slow")
+	h.st.SaveJob(j)
+	if err := h.m.StartJob(ctx, j.ID); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for !h.host.Running(j.ID) && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := h.m.StartJob(ctx, j.ID); err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("second start: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if err := h.m.CancelJob(ctx, j.ID); err != nil {
+		t.Fatal(err)
+	}
+	h.host.WaitIdle()
+	finished, _ = h.m.SyncClient(ctx, c.ID)
+	if len(finished) != 1 || finished[0].Status != bundle.Cancelled {
+		t.Fatalf("cancelled run: %+v", finished)
+	}
+}
+
+func TestOfflineClientIsMarkedAndBackupsStayPending(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	c, _ := h.jobSetup(t, "/srv/media")
+	h.host.Close()
+	if _, err := h.m.SyncClient(ctx, c.ID); err == nil {
+		t.Fatal("sync with an offline client should fail")
+	}
+	c, _ = h.st.GetClient(c.ID)
+	if c.Status != store.ClientUnreachable || !h.m.Pending(c) {
+		t.Fatalf("offline client: %s pending=%v", c.Status, h.m.Pending(c))
+	}
+	if err := h.m.Apply(ctx, c.ID); err == nil {
+		t.Fatal("apply to an offline client should fail")
+	}
+	if c, _ = h.st.GetClient(c.ID); c.ApplyError == "" {
+		t.Fatal("the apply error should be recorded")
 	}
 }

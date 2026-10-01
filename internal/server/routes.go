@@ -51,6 +51,26 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/clients/{id}/browse", priv(s.apiClientBrowse))
 	m.HandleFunc("POST /api/clients/{id}/remove", priv(s.apiClientRemove))
 	m.HandleFunc("GET /api/tasks/{id}", priv(s.apiTask))
+	m.HandleFunc("POST /api/clients/{id}/apply", priv(s.apiClientApply))
+
+	m.HandleFunc("GET /api/destinations", priv(s.apiDestinations))
+	m.HandleFunc("POST /api/destinations", priv(s.apiDestinationCreate))
+	m.HandleFunc("POST /api/destinations/test", priv(s.apiDestinationTest))
+	m.HandleFunc("PUT /api/destinations/{id}", priv(s.apiDestinationUpdate))
+	m.HandleFunc("DELETE /api/destinations/{id}", priv(s.apiDestinationDelete))
+
+	m.HandleFunc("GET /api/jobs", priv(s.apiJobs))
+	m.HandleFunc("POST /api/jobs", priv(s.apiJobCreate))
+	m.HandleFunc("GET /api/jobs/{id}", priv(s.apiJob))
+	m.HandleFunc("PUT /api/jobs/{id}", priv(s.apiJobUpdate))
+	m.HandleFunc("DELETE /api/jobs/{id}", priv(s.apiJobDelete))
+	m.HandleFunc("POST /api/jobs/{id}/run", priv(s.apiJobRun))
+	m.HandleFunc("POST /api/jobs/{id}/cancel", priv(s.apiJobCancel))
+	m.HandleFunc("GET /api/jobs/{id}/snapshots", priv(s.apiJobSnapshots))
+
+	m.HandleFunc("GET /api/runs", priv(s.apiRuns))
+	m.HandleFunc("GET /api/runs/{client}/{id}", priv(s.apiRun))
+	m.HandleFunc("GET /api/runs/{client}/{id}/log", priv(s.apiRunLog))
 
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Not found."})

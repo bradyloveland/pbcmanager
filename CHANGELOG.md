@@ -27,6 +27,15 @@ Version 2: a rewrite in Go, renamed PBC Manager. Work in progress; see docs/desi
   - **Managing a client:** client details, Check now, a folder browser, Repair (runs setup again), and Remove (cleans everything up, or just takes the client off the list).
   - **The server's SSH key** is shown under Settings.
 
+- **Backups** (milestone 3a):
+  - **Destinations:** PBS datastores with an optional namespace, a connection test showing free space, and write-only token secrets stored encrypted.
+  - **Backup jobs:** per client, with several folders (picked with a folder browser on the client), exclusions, a schedule, change detection, a speed limit, an encryption key, and one or more destinations.
+  - **Each client gets its jobs** as systemd timers and runs them itself, so backups carry on while the server is down. Credentials are encrypted with `systemd-creds` where available. Settings that couldn't be delivered are sent again automatically when the client is back.
+  - **Run now and Cancel.** Cancel asks the backup client to stop cleanly.
+  - **Run history** is collected from clients every 30 seconds while a backup runs and every 5 minutes otherwise, including runs from while the server was down. Finished logs are kept on the server.
+  - **Pages:** a live log for each run, an Activity page across all clients, snapshot lists from PBS, and the Dashboard showing each job's last 20 runs.
+  - **New settings** for how much run history clients and the server keep.
+
 ### Changed
 - The UI runs under a strict Content Security Policy with no inline scripts or styles.
 - UI files are cache-busted by content, so browsers never run a stale script after an upgrade.

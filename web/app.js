@@ -170,13 +170,28 @@ const routes = [
   [/^#\/clients$/, "clients", viewClients],
   [/^#\/clients\/new$/, "clients", viewClientNew],
   [/^#\/clients\/(\w+)$/, "clients", viewClient],
+  [/^#\/jobs$/, "jobs", viewJobs],
+  [/^#\/jobs\/new$/, "jobs", t => viewJobForm(null, t)],
+  [/^#\/jobs\/new\/(\w+)$/, "jobs", (client, t) => viewJobForm(null, t, client)],
+  [/^#\/jobs\/(\w+)\/edit$/, "jobs", viewJobForm],
+  [/^#\/jobs\/(\w+)$/, "jobs", viewJobDetail],
+  [/^#\/destinations$/, "destinations", viewDestinations],
+  [/^#\/destinations\/new$/, "destinations", t => viewDestinationForm(null, t)],
+  [/^#\/destinations\/(\w+)$/, "destinations", viewDestinationForm],
+  [/^#\/activity$/, "activity", viewActivity],
+  [/^#\/activity\/(\w+)\/([\w-]+)$/, "activity", viewRun],
   [/^#\/settings$/, "settings", viewSettings],
   [/^#\/account$/, "account", viewAccount],
   [/^#\/confirm-network\/([\w-]+)$/, "settings", viewConfirmNetwork],
 ];
 
+let pollTimer = null;
+function stopPoll() { if (pollTimer) clearInterval(pollTimer); pollTimer = null; }
+function poll(fn, ms) { stopPoll(); pollTimer = setInterval(() => fn().catch(() => {}), ms); }
+
 async function route() {
   if (!session || !session.user) return;
+  stopPoll();
   const token = ++routeToken;
   const hash = location.hash || "#/dashboard";
   const match = routes.find(([re]) => re.test(hash));
@@ -239,10 +254,445 @@ async function viewDashboard(token) {
   const trouble = clients.filter(c => c.status !== "ready" && c.status !== "setting-up");
   const head = trouble.length ? (trouble.length === 1 ? `${trouble[0].name} needs attention` : `${trouble.length} clients need attention`)
     : clients.length === 1 ? "Your client is ready" : `All ${clients.length} clients are ready`;
-  render(`<div class="health ${trouble.length ? "bad" : "ok"}"><span class="dot"></span><h1>${esc(head)}</h1></div>${twoStep}
-    <p class="lede">Backup jobs and their results arrive in the next development milestone.</p>
-    ${clientsTable(clients)}`);
-  bindRowLinks();
+  const draw = async () => {
+    const {jobs} = await api("GET", "/jobs");
+    if (token !== routeToken) return;
+    const failing = jobs.filter(j => lastFinished(j) && lastFinished(j).status === "failed");
+    let cls = trouble.length || failing.length ? "bad" : "ok", title = head;
+    if (failing.length) title = failing.length === 1 ? `${failing[0].name} on ${failing[0].client_name} failed its last run` : `${failing.length} jobs failed their last run`;
+    else if (!trouble.length && jobs.length) title = jobs.length === 1 ? "Your backup job is healthy" : `All ${jobs.length} backup jobs are healthy`;
+    render(`<div class="health ${cls}"><span class="dot"></span><h1>${esc(title)}</h1></div>${twoStep}
+      ${jobs.length ? jobLedger(jobs) : `<div class="panel empty"><h2>No backup jobs yet</h2><p>Your clients are ready. Add a destination for your Proxmox Backup Server, then create a job to choose folders and a schedule.</p><div class="btnrow"><a class="btn primary" href="#/jobs/new">Create a backup job</a><a class="btn" href="#/destinations/new">Add a destination</a></div></div>`}
+      <h2 class="mt-16">Clients</h2>${clientsTable(clients)}`);
+    bindRowLinks();
+    bindRunButtons(draw);
+  };
+  await draw();
+  poll(draw, 10000);
+}
+
+/* ---------- jobs ---------- */
+const STATUS_WORD = {success: "Succeeded", failed: "Failed", running: "Running", cancelled: "Cancelled"};
+const runPill = st => `<span class="pill ${{success: "ok", failed: "bad", running: "busy", cancelled: "warn"}[st] || "idle"}">${esc(STATUS_WORD[st] || st)}</span>`;
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+function fmtTime(ts) {
+  if (!ts) return "—";
+  const d = new Date(ts * 1000), n = new Date();
+  const time = d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+  const day = new Date(d); day.setHours(0, 0, 0, 0);
+  const today = new Date(n); today.setHours(0, 0, 0, 0);
+  const diff = Math.round((day - today) / 864e5);
+  if (diff === 0) return `Today ${time}`;
+  if (diff === -1) return `Yesterday ${time}`;
+  if (diff === 1) return `Tomorrow ${time}`;
+  return d.toLocaleDateString([], {month: "short", day: "numeric", year: d.getFullYear() !== n.getFullYear() ? "numeric" : undefined}) + " " + time;
+}
+function dur(a, b) {
+  if (!a) return "—";
+  let s = Math.max(0, Math.round((b || Date.now() / 1000) - a));
+  const h = Math.floor(s / 3600); s -= h * 3600; const m = Math.floor(s / 60); s -= m * 60;
+  return h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`;
+}
+function bytes(n) {
+  if (n == null) return "—";
+  const u = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"]; let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return `${n.toFixed(n < 10 && i ? 1 : 0)} ${u[i]}`;
+}
+function schedText(s) {
+  if (!s || s.type === "manual") return "Only when started by hand";
+  const mm = s.time.split(":")[1];
+  if (s.type === "hourly") return s.interval_hours === 1 ? `Every hour at :${mm}` : `Every ${s.interval_hours} hours at :${mm}`;
+  const days = s.days || [];
+  if (days.length === 7) return `Daily at ${s.time}`;
+  if (days.join() === "0,1,2,3,4") return `Weekdays at ${s.time}`;
+  if (days.join() === "5,6") return `Weekends at ${s.time}`;
+  return `${days.map(d => DAYS[d]).join(", ")} at ${s.time}`;
+}
+const lastFinished = j => (j.recent || []).find(r => r.status !== "running");
+const isRunning = j => (j.recent || []).some(r => r.status === "running");
+
+function tape(recent, clientId) {
+  const slots = 20, runs = (recent || []).slice(0, slots).reverse();
+  let html = "";
+  for (let i = 0; i < slots - runs.length; i++) html += `<span aria-hidden="true"></span>`;
+  for (const r of runs) {
+    const label = `${STATUS_WORD[r.status] || r.status}, ${fmtTime(r.started)}, ${r.destination_name}`;
+    html += `<a class="${esc(r.status)}" href="#/activity/${esc(clientId)}/${esc(r.id)}" title="${esc(label)}" aria-label="${esc(label)}"></a>`;
+  }
+  return `<div class="tape">${html}</div>`;
+}
+function jobState(j) {
+  const cur = (j.recent || []).find(r => r.status === "running");
+  if (cur) return `<div class="state running"><b>Running now</b><span class="sub">to ${esc(cur.destination_name)} for ${dur(cur.started)}</span></div>`;
+  const last = lastFinished(j);
+  if (!last) return `<div class="state"><b>Never run</b><span class="sub">No history yet</span></div>`;
+  return `<div class="state ${esc(last.status)}"><b>${STATUS_WORD[last.status]}</b><span class="sub">${esc(ago(last.ended))}</span></div>`;
+}
+function nextText(j) {
+  if (!j.enabled) return `<b>Paused</b><div class="sub">Won't run on schedule</div>`;
+  if (!j.next_run) return `<b>By hand</b><div class="sub">Start it with Run now</div>`;
+  return `<b>${esc(fmtTime(j.next_run))}</b><div class="sub">${esc(schedText(j.schedule))}</div>`;
+}
+function jobLedger(jobs) {
+  return `<div class="ledger">
+    <div class="ledger-head"><div>Job</div><div>Last 20 runs, oldest to newest</div><div>Last result</div><div>Next run</div><div></div></div>
+    ${jobs.map(j => `<div class="jobrow ${j.enabled ? "" : "paused"}">
+      <div><a class="jobname" href="#/jobs/${esc(j.id)}">${esc(j.name)}</a>
+        <div class="sub">${esc(j.client_name)} to ${esc(j.destination_names.join(", ") || "no destination")}</div></div>
+      ${tape(j.recent, j.client_id)}
+      ${jobState(j)}
+      <div class="small">${nextText(j)}</div>
+      <div class="right">${runButton(j)}</div>
+    </div>`).join("")}</div>`;
+}
+function runButton(j) {
+  return isRunning(j) ? `<button class="btn small" data-cancel="${esc(j.id)}">Cancel</button>` : `<button class="btn small" data-run="${esc(j.id)}">Run now</button>`;
+}
+function bindRunButtons(refresh) {
+  $$("[data-run]").forEach(b => b.addEventListener("click", async () => {
+    b.disabled = true;
+    try { await api("POST", `/jobs/${b.dataset.run}/run`); toast("Backup started. Results appear here in a few seconds."); setTimeout(refresh, 3500); }
+    catch (ex) { toast(ex.message, "bad"); b.disabled = false; }
+  }));
+  $$("[data-cancel]").forEach(b => b.addEventListener("click", async () => {
+    if (!confirm("Stop this backup? The partial snapshot will be discarded.")) return;
+    b.disabled = true;
+    try { await api("POST", `/jobs/${b.dataset.cancel}/cancel`); toast("Stopping the backup."); setTimeout(refresh, 3500); }
+    catch (ex) { toast(ex.message, "bad"); b.disabled = false; }
+  }));
+}
+
+async function viewJobs(token) {
+  const [{jobs}, {clients}, {destinations}] = await Promise.all([api("GET", "/jobs"), api("GET", "/clients"), api("GET", "/destinations")]);
+  if (token !== routeToken) return;
+  const missing = !clients.length ? ["a client", "#/clients/new", "Add a client"] : !destinations.length ? ["a destination", "#/destinations/new", "Add a destination"] : null;
+  render(`<div class="pagehead"><div><h1>Backup jobs</h1><p class="lede">Each job backs up folders on one client to one or more destinations, on its own schedule.</p></div>
+    ${missing ? "" : `<a class="btn primary" href="#/jobs/new">Create a backup job</a>`}</div>
+    ${jobs.length ? jobLedger(jobs) : `<div class="panel empty"><h2>No jobs yet</h2><p>${missing ? `Add ${missing[0]} first, so jobs have something to back up${missing[0] === "a client" ? "" : " to"}.` : "Create a job to choose folders and a schedule."}</p>
+      <a class="btn primary" href="${missing ? missing[1] : "#/jobs/new"}">${missing ? missing[2] : "Create a backup job"}</a></div>`}`);
+  const refresh = async () => { if (token === routeToken) route(); };
+  bindRunButtons(refresh);
+  poll(async () => { const d = await api("GET", "/jobs"); if (token === routeToken && $(".ledger")) { $(".ledger").outerHTML = jobLedger(d.jobs); bindRunButtons(refresh); } }, 8000);
+}
+
+function runsTable(items, showJob) {
+  if (!items.length) return `<p class="muted">No runs yet.</p>`;
+  return `<table><thead><tr><th>Result</th>${showJob ? "<th>Job</th>" : ""}<th>Destination</th><th>Started</th><th>Took</th><th>Details</th></tr></thead><tbody>
+    ${items.map(({run: r, client_name}) => `<tr class="clickable" data-href="#/activity/${esc(r.client_id)}/${esc(r.id)}">
+      <td>${runPill(r.status)}</td>${showJob ? `<td><a class="jobname" href="#/activity/${esc(r.client_id)}/${esc(r.id)}">${esc(r.job_name)}</a><div class="sub">${esc(client_name)}, ${r.trigger === "manual" ? "started by hand" : "scheduled"}</div></td>` : ""}
+      <td class="small">${esc(r.destination_name)}</td>
+      <td class="small">${esc(fmtTime(r.started))}</td>
+      <td class="small">${esc(dur(r.started, r.ended || null))}</td>
+      <td><div class="summary">${esc(r.summary || (r.status === "running" ? "In progress" : ""))}</div></td></tr>`).join("")}
+  </tbody></table>`;
+}
+
+async function viewJobDetail(id, token) {
+  const [{job: j}] = await Promise.all([api("GET", `/jobs/${id}`)]);
+  if (token !== routeToken) return;
+  render(`<a class="back" href="#/jobs">‹ Backup jobs</a>
+    <div class="pagehead"><div><h1>${esc(j.name)}</h1><p class="lede">${esc(j.client_name)} · ${esc(schedText(j.schedule))}${j.enabled ? "" : ", currently paused"}</p></div>
+      <div class="btnrow"><a class="btn" href="#/jobs/${esc(id)}/edit">Edit job</a><span id="j-run">${runButton(j).replace("btn small", "btn primary")}</span></div></div>
+    <div class="cols"><div class="stack">
+      <div class="panel"><h2>Recent runs</h2><div id="runs" class="tablewrap"><div class="loading">Loading…</div></div></div>
+      <div class="panel"><h2>Snapshots on the server</h2><div id="snaps"><div class="loading">Asking the server…</div></div></div>
+    </div>
+    <div class="panel"><h2>Details</h2><dl class="kv">
+      <dt>Client</dt><dd><a href="#/clients/${esc(j.client_id)}">${esc(j.client_name)}</a></dd>
+      <dt>Destinations</dt><dd>${j.destination_names.map(esc).join("<br>") || `<span class="bad-text">None</span>`}</dd>
+      <dt>Backup ID</dt><dd class="mono">host/${esc(j.backup_id)}</dd>
+      <dt>Next run</dt><dd>${j.next_run ? esc(fmtTime(j.next_run)) : `<span class="muted">${j.enabled ? "Only by hand" : "Paused"}</span>`}</dd>
+      <dt>Folders</dt><dd>${j.shares.map(s => `<div><span class="mono">${esc(s.path)}</span><div class="sub">saved as ${esc(s.archive)}.pxar</div></div>`).join("")}</dd>
+      <dt>Excluded</dt><dd>${j.excludes.length ? j.excludes.map(e => `<div class="mono">${esc(e)}</div>`).join("") : `<span class="muted">Nothing</span>`}</dd>
+      <dt>Change detection</dt><dd>${esc({metadata: "Metadata (fastest)", data: "Data", legacy: "Legacy"}[j.change_detection])}</dd>
+      <dt>Speed limit</dt><dd>${j.rate ? esc(j.rate) + "/s" : `<span class="muted">None</span>`}</dd>
+      <dt>Encryption</dt><dd>${j.keyfile ? `<span class="mono">${esc(j.keyfile)}</span>` : `<span class="muted">Not encrypted by this job</span>`}</dd>
+    </dl></div></div>`);
+  const drawRuns = async () => {
+    const [{runs}, {job}] = await Promise.all([api("GET", `/runs?job=${id}&limit=25`), api("GET", `/jobs/${id}`)]);
+    if (token !== routeToken) return;
+    $("#runs").innerHTML = runsTable(runs, false);
+    $("#j-run").innerHTML = runButton(job).replace("btn small", "btn primary");
+    bindRowLinks();
+    bindRunButtons(drawRuns);
+  };
+  await drawRuns();
+  poll(drawRuns, 5000);
+  api("GET", `/jobs/${id}/snapshots`).then(({destinations}) => {
+    if (token !== routeToken) return;
+    $("#snaps").innerHTML = destinations.map(d => `<h3 class="mt-12">${esc(d.destination_name)}</h3>
+      <p class="hint m-0 mb-14">Stored in <span class="mono">${d.namespace ? esc(d.namespace) + "/" : ""}${esc(d.group)}</span>. Restore files from the PBS web interface or with <span class="mono">proxmox-backup-client restore</span>.</p>
+      ${d.error ? `<div class="result bad">${esc(d.error)}</div>` : d.snapshots.length ? `<div class="tablewrap"><table><thead><tr><th>Taken</th><th>Size</th><th>Verified</th></tr></thead><tbody>
+        ${d.snapshots.map(s => `<tr><td>${esc(fmtTime(s.time))}${s.protected ? ` <span class="pill busy">Protected</span>` : ""}</td><td>${esc(bytes(s.size))}</td>
+        <td>${s.verified === "ok" ? `<span class="pill ok">OK</span>` : s.verified === "failed" ? `<span class="pill bad">Failed</span>` : `<span class="muted small">Not yet</span>`}</td></tr>`).join("")}
+        </tbody></table></div>` : `<p class="muted">No snapshots yet. They appear after the first successful run.</p>`}`).join("") || `<p class="muted">No destinations.</p>`;
+  }).catch(ex => { if (token === routeToken) $("#snaps").innerHTML = `<div class="result bad">${esc(ex.message)}</div>`; });
+}
+
+async function viewJobForm(id, token, presetClient) {
+  const [{clients}, {destinations}, existing] = await Promise.all([api("GET", "/clients"), api("GET", "/destinations"), id ? api("GET", `/jobs/${id}`) : null]);
+  if (token !== routeToken) return;
+  if (!clients.length || !destinations.length) {
+    render(`<a class="back" href="#/jobs">‹ Backup jobs</a><div class="panel empty"><h2>${clients.length ? "Add a destination first" : "Add a client first"}</h2>
+      <p>${clients.length ? "A job needs a Proxmox Backup Server datastore to send its backups to." : "A job backs up folders on a client."}</p>
+      <a class="btn primary" href="${clients.length ? "#/destinations/new" : "#/clients/new"}">${clients.length ? "Add a destination" : "Add a client"}</a></div>`);
+    return;
+  }
+  const job = existing && existing.job;
+  const j = job || {name: "", client_id: presetClient || (clients.length === 1 ? clients[0].id : ""), backup_id: "", shares: [], excludes: [],
+    schedule: {type: "daily", time: "02:00", days: [0, 1, 2, 3, 4, 5, 6], interval_hours: 6}, change_detection: "metadata", rate: "", keyfile: "",
+    enabled: true, destinations: destinations.length === 1 ? [destinations[0].id] : []};
+  const shares = j.shares.length ? j.shares.map(s => ({...s, auto: false})) : [{path: "", archive: "", auto: true}];
+  const s = j.schedule;
+  const clientName = cid => (clients.find(c => c.id === cid) || {}).name || "";
+  render(`<a class="back" href="${id ? `#/jobs/${esc(id)}` : "#/jobs"}">‹ ${id ? esc(j.name) : "Backup jobs"}</a>
+    <h1>${id ? "Edit backup job" : "Create a backup job"}</h1>
+    <p class="lede">Pick a client, the folders to protect, where they go, and when. The client gets the job straight away and runs it on its own schedule.</p>
+    <form id="jobform" class="panel" novalidate>
+      <fieldset class="section"><legend>Basics</legend>
+        <div class="formgrid top">
+          <label class="field"><span>Client</span>${id ? `<input type="text" value="${esc(clientName(j.client_id))}" disabled><input type="hidden" name="client_id" value="${esc(j.client_id)}">`
+            : `<select name="client_id"><option value="">Choose a client…</option>${clients.map(c => `<option value="${esc(c.id)}" ${c.id === j.client_id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>`}</label>
+          <label class="field"><span>Job name</span><input type="text" name="name" value="${esc(j.name)}" placeholder="Media shares" maxlength="64"></label>
+          <div class="field full"><span>Back up to</span><div class="choice">${destinations.map(d => `<label class="check"><input type="checkbox" name="dest" value="${esc(d.id)}" ${j.destinations.includes(d.id) ? "checked" : ""}><span><b>${esc(d.name)}</b> <span class="sub mono">${esc(d.repository)}${d.namespace ? " · " + esc(d.namespace) : ""}</span></span></label>`).join("")}</div>
+            <small>Each destination is backed up in turn. For an offsite copy, a sync job in PBS (one PBS pulling from another) reads the client's files only once.</small></div>
+          <label class="field"><span>Backup ID</span><input type="text" name="backup_id" value="${esc(j.backup_id)}" class="mono" placeholder="The client's host name">
+            <small>The group name on the server (host/<i>id</i>). Keep it the same so each run builds on the last one.</small></label>
+          <label class="check"><input type="checkbox" name="enabled" ${j.enabled ? "checked" : ""}><span><b>Run on schedule</b><br><span class="hint">Turn off to pause scheduled runs. You can still use Run now.</span></span></label>
+        </div>
+      </fieldset>
+      <fieldset class="section"><legend>Folders to back up</legend>
+        <p class="hint">Each folder becomes its own archive. Keep archive names unchanged between runs so unchanged data isn't sent again.</p>
+        <div class="share-head"><span>Folder</span><span></span><span>Archive name</span><span></span></div>
+        <div class="shares" id="shares"></div>
+        <button type="button" class="btn small mt-12" id="addshare">Add another folder</button>
+      </fieldset>
+      <fieldset class="section"><legend>Schedule</legend>
+        <div class="seg mt-12" role="radiogroup" aria-label="How often">
+          ${[["manual", "By hand only"], ["daily", "On certain days"], ["hourly", "Every few hours"]].map(([v, l]) => `<label><input type="radio" name="stype" value="${v}" ${s.type === v ? "checked" : ""}>${l}</label>`).join("")}
+        </div>
+        <div id="sched-daily" class="formgrid mt-16"><div class="field full"><span>Days</span><div class="days">${DAYS.map((d, i) => `<label><input type="checkbox" name="day" value="${i}" ${(s.days || []).includes(i) ? "checked" : ""}>${d}</label>`).join("")}</div></div></div>
+        <div id="sched-hourly" class="formgrid mt-16"><label class="field"><span>Every</span><select name="interval">${[1, 2, 3, 4, 6, 8, 12].map(n => `<option value="${n}" ${s.interval_hours === n ? "selected" : ""}>${n === 1 ? "hour" : n + " hours"}</option>`).join("")}</select></label></div>
+        <div id="sched-time" class="formgrid mt-16"><label class="field"><span id="time-label">Start time</span><input type="time" name="time" value="${esc(s.time)}"><small id="time-hint"></small></label></div>
+        <p class="hint mt-12" id="sched-summary"></p>
+      </fieldset>
+      <fieldset class="section"><details class="adv" ${j.excludes.length || j.rate || j.keyfile || j.change_detection !== "metadata" ? "open" : ""}><summary>More options</summary>
+        <div class="formgrid">
+          <label class="field full"><span>Skip these files and folders</span><textarea name="excludes" placeholder="lost+found&#10;**/.recycle&#10;**/*.tmp">${esc(j.excludes.join("\n"))}</textarea>
+            <small>One pattern per line, relative to each folder. Use ** to match any depth.</small></label>
+          <label class="field"><span>Change detection</span><select name="mode">
+            <option value="metadata" ${j.change_detection === "metadata" ? "selected" : ""}>Metadata: skip files whose size and time are unchanged</option>
+            <option value="data" ${j.change_detection === "data" ? "selected" : ""}>Data: read every file each run</option>
+            <option value="legacy" ${j.change_detection === "legacy" ? "selected" : ""}>Legacy: single-archive format</option></select>
+            <small>Metadata is much faster for large, mostly unchanged shares.</small></label>
+          <label class="field"><span>Upload speed limit</span><input type="text" name="rate" value="${esc(j.rate)}" placeholder="No limit, e.g. 20MiB"><small>Per second.</small></label>
+          <label class="field"><span>Encryption key file on the client</span><input type="text" name="keyfile" value="${esc(j.keyfile)}" class="mono" placeholder="/root/pbs.key">
+            <small>Optional. Create one with <span class="mono">proxmox-backup-client key create</span> and keep a copy somewhere other than the client.</small></label>
+          <label class="field"><span>Key file password</span><input type="password" name="keyfile_password" autocomplete="new-password" placeholder="${job && job.keyfile_password_set ? "Saved. Leave blank to keep it" : "Only if the key has one"}">
+            <small>Stored encrypted on the client, never shown again.</small></label>
+        </div></details>
+      </fieldset>
+      <div id="form-error" class="result bad hidden" role="alert"></div>
+      <div class="formfoot">
+        <div class="btnrow"><button class="btn primary" type="submit">${id ? "Save changes" : "Create job"}</button><a class="btn" href="${id ? `#/jobs/${esc(id)}` : "#/jobs"}">Cancel</a></div>
+        ${id ? `<button type="button" class="btn danger" id="deljob">Delete job</button>` : ""}
+      </div>
+    </form>`);
+
+  const form = $("#jobform");
+  const archiveFrom = p => { const b = (p.replace(/\/+$/, "").split("/").pop() || "root").replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^[-_]+|[-_]+$/g, ""); return (b || "root").slice(0, 48); };
+  const drawShares = () => {
+    $("#shares").innerHTML = shares.map((sh, i) => `<div class="share">
+      <input type="text" class="mono" data-i="${i}" data-k="path" value="${esc(sh.path)}" placeholder="/srv/dev-disk-by-uuid-…/Media" aria-label="Folder path">
+      <button type="button" class="btn small" data-browse="${i}">Browse</button>
+      <input type="text" class="mono" data-i="${i}" data-k="archive" value="${esc(sh.archive)}" placeholder="archive name" aria-label="Archive name">
+      <button type="button" class="iconbtn" data-del="${i}" aria-label="Remove folder" ${shares.length === 1 ? "disabled" : ""}>×</button></div>`).join("");
+    $$("#shares input").forEach(inp => inp.addEventListener("input", () => {
+      const sh = shares[inp.dataset.i];
+      sh[inp.dataset.k] = inp.value;
+      if (inp.dataset.k === "archive") sh.auto = false;
+      if (inp.dataset.k === "path" && sh.auto) { sh.archive = archiveFrom(inp.value); inp.parentNode.querySelector("[data-k=archive]").value = sh.archive; }
+    }));
+    $$("[data-del]").forEach(b => b.addEventListener("click", () => { shares.splice(+b.dataset.del, 1); drawShares(); }));
+    $$("[data-browse]").forEach(b => b.addEventListener("click", async () => {
+      const cid = form.client_id.value;
+      if (!cid) { toast("Choose the client first.", "bad"); return; }
+      const sh = shares[+b.dataset.browse];
+      const picked = await pickFolder(cid, sh.path || "/", true);
+      if (picked) { sh.path = picked; if (sh.auto || !sh.archive) { sh.archive = archiveFrom(picked); sh.auto = true; } drawShares(); }
+    }));
+  };
+  drawShares();
+  $("#addshare").addEventListener("click", () => { shares.push({path: "", archive: "", auto: true}); drawShares(); $$("#shares input[data-k=path]").pop().focus(); });
+  const readSched = () => ({type: form.stype.value, time: form.time.value || "02:00", days: $$("[name=day]:checked", form).map(c => +c.value), interval_hours: +form.interval.value});
+  const syncSched = () => {
+    const t = form.stype.value;
+    $("#sched-daily").classList.toggle("hidden", t !== "daily");
+    $("#sched-hourly").classList.toggle("hidden", t !== "hourly");
+    $("#sched-time").classList.toggle("hidden", t === "manual");
+    $("#time-label").textContent = t === "hourly" ? "Starting at" : "Start time";
+    $("#time-hint").textContent = t === "hourly" ? "Runs at this minute past the hour, on hours that divide evenly by the interval." : "In the client's time zone.";
+    $("#sched-summary").textContent = t === "manual" ? "This job only runs when you press Run now." : "Summary: " + schedText(readSched());
+  };
+  form.addEventListener("change", syncSched);
+  syncSched();
+  form.addEventListener("submit", async e => {
+    e.preventDefault();
+    const err = $("#form-error"); err.classList.add("hidden");
+    const payload = {client_id: form.client_id.value, name: form.name.value, backup_id: form.backup_id.value, enabled: form.enabled.checked,
+      destinations: $$("[name=dest]:checked", form).map(c => c.value),
+      shares: shares.filter(sh => sh.path.trim()).map(sh => ({path: sh.path.trim(), archive: sh.archive.trim()})),
+      schedule: readSched(), excludes: form.excludes.value, change_detection: form.mode.value, rate: form.rate.value,
+      keyfile: form.keyfile.value, keyfile_password: form.keyfile_password.value};
+    const btn = $("button[type=submit]", form); btn.disabled = true;
+    try {
+      const r = id ? await api("PUT", `/jobs/${id}`, payload) : await api("POST", "/jobs", payload);
+      toast(id ? "Changes saved. Sending them to the client." : "Job created. Sending it to the client.");
+      location.hash = `#/jobs/${r.job.id}`;
+    } catch (ex) { showError(err, ex.message); err.scrollIntoView({block: "center"}); }
+    finally { btn.disabled = false; }
+  });
+  if (id) $("#deljob").addEventListener("click", async () => {
+    if (!confirm(`Delete “${j.name}”? Its schedule is removed from the client. Snapshots already on the server are kept.`)) return;
+    try { await api("DELETE", `/jobs/${id}`); toast("Job deleted."); location.hash = "#/jobs"; }
+    catch (ex) { toast(ex.message, "bad"); }
+  });
+}
+
+/* ---------- destinations ---------- */
+function usageHtml(u) {
+  if (!u || u.total == null) return `<div class="result ok">Connected. The datastore answered.</div>`;
+  const pct = u.total ? Math.round(u.used / u.total * 100) : 0;
+  return `<div class="result ok">Connected. ${bytes(u.used)} of ${bytes(u.total)} used (${pct}%), ${bytes(u.avail)} free.</div>
+    <div class="meter ${pct >= 90 ? "bad" : pct >= 80 ? "warn" : ""}" data-pct="${pct}"><i></i></div>`;
+}
+function sizeMeters(root) { $$(".meter[data-pct]", root).forEach(m => { $("i", m).style.width = Math.min(100, +m.dataset.pct) + "%"; }); }
+
+async function viewDestinations(token) {
+  const {destinations} = await api("GET", "/destinations");
+  if (token !== routeToken) return;
+  render(`<div class="pagehead"><div><h1>Destinations</h1><p class="lede">The Proxmox Backup Server datastores jobs send backups to, with the credentials clients use to reach them.</p></div>
+    <a class="btn primary" href="#/destinations/new">Add a destination</a></div>
+    ${destinations.length ? `<div class="stack">${destinations.map(d => `<div class="panel"><div class="pagehead m-0">
+      <div><h3><a class="jobname" href="#/destinations/${esc(d.id)}">${esc(d.name)}</a></h3><div class="sub mono">${esc(d.repository)}${d.namespace ? " · namespace " + esc(d.namespace) : ""}</div>
+        <div class="sub">${d.used_by.length ? `Used by ${esc(d.used_by.join(", "))}` : "Not used by any job"}${d.fingerprint ? "" : ", no fingerprint saved"}</div></div>
+      <div class="btnrow"><button class="btn small" data-check="${esc(d.id)}">Check connection</button><a class="btn small" href="#/destinations/${esc(d.id)}">Edit</a></div></div>
+      <div id="u-${esc(d.id)}"></div></div>`).join("")}</div>`
+      : `<div class="panel empty"><h2>No destinations yet</h2><p>Add the PBS server and datastore to back up to, with an API token for it. For one token per client, add a destination per client pointing at the same datastore.</p><a class="btn primary" href="#/destinations/new">Add a destination</a></div>`}`);
+  $$("[data-check]").forEach(b => b.addEventListener("click", async () => {
+    const d = destinations.find(x => x.id === b.dataset.check), box = $(`#u-${d.id}`);
+    b.disabled = true; box.innerHTML = `<div class="result info">Connecting…</div>`;
+    try { box.innerHTML = usageHtml((await api("POST", "/destinations/test", {...d, secret: ""})).usage); sizeMeters(box); }
+    catch (ex) { box.innerHTML = `<div class="result bad">${esc(ex.message)}</div>`; }
+    finally { b.disabled = false; }
+  }));
+}
+
+async function viewDestinationForm(id, token) {
+  const {destinations} = await api("GET", "/destinations");
+  if (token !== routeToken) return;
+  const t = id ? destinations.find(x => x.id === id) : null;
+  if (id && !t) throw new Error("That destination doesn't exist anymore.");
+  const v = t || {name: "", host: "", port: 8007, datastore: "", namespace: "", username: "", token_name: "", fingerprint: ""};
+  render(`<a class="back" href="#/destinations">‹ Destinations</a>
+    <h1>${id ? "Edit destination" : "Add a destination"}</h1>
+    <p class="lede">In PBS, create a user and an API token, and give both the DatastoreBackup role on the datastore (or on a namespace in it). The fingerprint is under Dashboard, Show Fingerprint.</p>
+    <form id="tform" class="panel" novalidate>
+      <fieldset class="section"><legend>Server</legend>
+        <div class="formgrid top">
+          <label class="field full"><span>Name</span><input type="text" name="name" value="${esc(v.name)}" placeholder="Home PBS" maxlength="64"></label>
+          <label class="field"><span>Host or IP address</span><input type="text" name="host" value="${esc(v.host)}" placeholder="pbs.lan"></label>
+          <label class="field"><span>Port</span><input type="number" name="port" value="${esc(v.port)}" min="1" max="65535"></label>
+          <label class="field"><span>Datastore</span><input type="text" name="datastore" value="${esc(v.datastore)}" placeholder="store1"></label>
+          <label class="field"><span>Namespace</span><input type="text" name="namespace" value="${esc(v.namespace)}" class="mono" placeholder="Datastore root">
+            <small>Optional, like <span class="mono">clients/nas</span>. It must already exist in PBS.</small></label>
+          <label class="field full"><span>Fingerprint</span><input type="text" name="fingerprint" value="${esc(v.fingerprint)}" class="mono" placeholder="ab:cd:ef:…">
+            <small>Needed if the server uses its default self-signed certificate. Without it, backups fail.</small></label>
+        </div>
+      </fieldset>
+      <fieldset class="section"><legend>Credentials</legend>
+        <div class="formgrid top">
+          <label class="field"><span>User</span><input type="text" name="username" value="${esc(v.username)}" placeholder="nas-backup@pbs" autocomplete="off"><small>Include the realm after the @.</small></label>
+          <label class="field"><span>API token name</span><input type="text" name="token_name" value="${esc(v.token_name)}" placeholder="nas" autocomplete="off"><small>Just the part after the !. Leave blank to use the user's password instead.</small></label>
+          <label class="field full"><span>Token secret</span><input type="password" name="secret" autocomplete="new-password" placeholder="${t && t.secret_set ? "Saved. Leave blank to keep it" : "Shown once when you created the token"}">
+            <small>Stored encrypted on this server and on each client that uses it. It's never shown again.</small></label>
+        </div>
+      </fieldset>
+      <div id="t-result"></div>
+      <div class="formfoot">
+        <div class="btnrow"><button class="btn primary" type="submit">${id ? "Save changes" : "Add destination"}</button><button type="button" class="btn" id="ttest">Test connection</button><a class="btn" href="#/destinations">Cancel</a></div>
+        ${id ? `<button type="button" class="btn danger" id="tdel">Delete destination</button>` : ""}
+      </div>
+    </form>`);
+  const form = $("#tform"), out = $("#t-result");
+  const read = () => ({id: id || undefined, name: form.name.value, host: form.host.value, port: Number(form.port.value) || 0, datastore: form.datastore.value,
+    namespace: form.namespace.value, fingerprint: form.fingerprint.value, username: form.username.value, token_name: form.token_name.value, secret: form.secret.value});
+  $("#ttest").addEventListener("click", async e => {
+    e.target.disabled = true; out.innerHTML = `<div class="result info">Connecting…</div>`;
+    try { out.innerHTML = usageHtml((await api("POST", "/destinations/test", read())).usage); sizeMeters(out); }
+    catch (ex) { out.innerHTML = `<div class="result bad">${esc(ex.message)}</div>`; }
+    finally { e.target.disabled = false; }
+  });
+  form.addEventListener("submit", async e => {
+    e.preventDefault(); out.innerHTML = "";
+    const btn = $("button[type=submit]", form); btn.disabled = true;
+    try {
+      id ? await api("PUT", `/destinations/${id}`, read()) : await api("POST", "/destinations", read());
+      toast(id ? "Changes saved. Clients using it get the update." : "Destination added.");
+      location.hash = "#/destinations";
+    } catch (ex) { out.innerHTML = `<div class="result bad">${esc(ex.message)}</div>`; }
+    finally { btn.disabled = false; }
+  });
+  if (id) $("#tdel").addEventListener("click", async () => {
+    if (!confirm(`Delete “${v.name}”? This only removes it from PBC Manager. Nothing on the PBS server is touched.`)) return;
+    try { await api("DELETE", `/destinations/${id}`); toast("Destination deleted."); location.hash = "#/destinations"; }
+    catch (ex) { out.innerHTML = `<div class="result bad">${esc(ex.message)}</div>`; }
+  });
+}
+
+/* ---------- activity ---------- */
+async function viewActivity(token) {
+  render(`<h1>Activity</h1><p class="lede">Every backup run on every client, newest first. Open one to read its log.</p><div class="panel tablewrap" id="act"><div class="loading">Loading…</div></div>`);
+  const draw = async () => {
+    const {runs} = await api("GET", "/runs?limit=200");
+    if (token !== routeToken) return;
+    $("#act").innerHTML = runsTable(runs, true);
+    bindRowLinks();
+  };
+  await draw();
+  poll(draw, 8000);
+}
+
+async function viewRun(clientId, runId, token) {
+  let offset = 0, logText = "";
+  render(`<a class="back" href="#/activity">‹ Activity</a>
+    <div class="pagehead"><div><h1 id="run-title">Run</h1><p class="lede" id="run-sub"></p></div><div class="btnrow" id="run-actions"></div></div>
+    <div id="run-summary"></div>
+    <pre class="log" id="log" tabindex="0" aria-label="Backup log"></pre>`);
+  const logEl = $("#log");
+  const draw = async () => {
+    const {run: r, client_name} = await api("GET", `/runs/${clientId}/${runId}`);
+    if (token !== routeToken) return;
+    $("#run-title").innerHTML = `${esc(r.job_name)} ${runPill(r.status)}`;
+    $("#run-sub").textContent = `${client_name} to ${r.destination_name}. ${r.trigger === "manual" ? "Started by hand" : "Scheduled"}, began ${fmtTime(r.started)}, ${r.status === "running" ? "running for " : "took "}${dur(r.started, r.ended || null)}.`;
+    $("#run-actions").innerHTML = r.status === "running" ? `<button class="btn danger" data-cancel="${esc(r.job_id)}">Cancel run</button>` : `<a class="btn" href="#/jobs/${esc(r.job_id)}">View job</a>`;
+    bindRunButtons(draw);
+    $("#run-summary").innerHTML = r.status === "failed" && r.summary ? `<div class="banner bad"><b>Why it failed:</b> ${esc(r.summary)}</div>` : "";
+    try {
+      const d = await api("GET", `/runs/${clientId}/${runId}/log?offset=${offset}`);
+      if (token !== routeToken) return;
+      if (d.text) {
+        const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+        logText += d.text; offset = d.offset;
+        logEl.innerHTML = esc(logText).replace(/^.*\berror\b.*$/gim, m => `<span class="err">${m}</span>`);
+        if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+      } else if (!logText) logEl.textContent = "No output yet.";
+      if (d.done && r.status !== "running") stopPoll();
+    } catch (ex) { if (!logText) logEl.textContent = ex.message; }
+  };
+  await draw();
+  poll(draw, 2000);
 }
 
 /* ---------- clients ---------- */
@@ -416,12 +866,18 @@ async function viewClient(id, token) {
       <dl class="kv mt-12"><dt>Trusted key</dt><dd class="mono">${esc(c.host_key_fingerprint)}</dd><dt>Key it shows now</dt><dd class="mono">${esc(c.offered_fingerprint)}</dd></dl>
       <p class="m-0 mt-12">If you reinstalled the client or its SSH server, use <b>Repair</b> to trust the new key. Otherwise, find out why before trusting it.</p></div>`,
   }[c.status] || "";
+  const pending = c.settings_pending ? `<div class="banner warn"><b>${esc(c.name)} doesn't have the latest job settings yet.</b> ${c.apply_error ? esc(c.apply_error) + ". " : ""}They're sent automatically when it can be reached.
+    <div class="btnrow"><button class="btn small" id="c-apply">Send them now</button></div></div>` : "";
+  const {jobs} = await api("GET", `/jobs?client=${id}`);
+  if (token !== routeToken) return;
   render(`<a class="back" href="#/clients">‹ Clients</a>
     <div class="pagehead"><div><h1>${esc(c.name)} ${clientPill(c.status)}</h1><p class="lede">${esc(c.os_pretty || c.address)}</p></div>
       <div class="btnrow"><button class="btn" id="c-check">Check now</button><button class="btn" id="c-browse" ${c.status === "ready" ? "" : "disabled"}>Browse folders</button></div></div>
-    ${banner}
+    ${banner}${pending}
     <div class="cols"><div class="stack">
       <div class="panel" id="c-task" ${task && !task.done ? "" : "hidden"}><h2>Setup</h2></div>
+      <div class="panel"><div class="pagehead m-0"><h2 class="m-0">Backup jobs</h2><a class="btn small" href="#/jobs/new/${esc(id)}">Add a backup job</a></div>
+        ${jobs.length ? `<ul class="steps mt-12">${jobs.map(j => `<li><a class="jobname" href="#/jobs/${esc(j.id)}">${esc(j.name)}</a> <span class="sub">${esc(schedText(j.schedule))}${j.enabled ? "" : ", paused"}</span></li>`).join("")}</ul>` : `<p class="muted mt-12">No jobs for this client yet.</p>`}</div>
       <div class="panel"><h2>Repair</h2><p class="hint m-0 mb-14">Runs setup again as root: reinstalls pbcm-runner, the pbcm account and its sudo rule, and the backup client if it's missing. Use it after reinstalling the client, if its host key changed, or if something was removed by hand.</p>
         <button class="btn" id="c-repair">Repair ${esc(c.name)}</button><div id="c-repair-flow"></div></div>
       <div class="panel"><h2>Remove</h2><p class="hint m-0 mb-14">Stops managing this client.</p>
@@ -451,6 +907,11 @@ async function viewClient(id, token) {
     } catch (ex) { toast(ex.message, "bad"); e.target.disabled = false; }
   };
   $("#c-browse").onclick = () => pickFolder(id, "/", false);
+  if ($("#c-apply")) $("#c-apply").onclick = async e => {
+    e.target.disabled = true;
+    try { await api("POST", `/clients/${id}/apply`); toast("Settings sent."); route(); }
+    catch (ex) { toast(ex.message, "bad"); e.target.disabled = false; }
+  };
 
   $("#c-repair").onclick = async () => {
     $("#c-repair").classList.add("hidden");

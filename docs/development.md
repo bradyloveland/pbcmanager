@@ -5,7 +5,11 @@
 ```
 cmd/pbcm/          The server program and its commands (serve, setup-code, passwd, totp-reset, network)
 cmd/pbcm-runner/   The program installed on clients (always linux/amd64)
-internal/clients/   Adding, checking, browsing, repairing and removing clients; setup.sh runs on the client
+internal/backups/   Destination and job checks, building each client's bundle, the server's own PBS calls
+internal/bundle/    What the server sends clients and what they report back (shared by pbcm and pbcm-runner)
+internal/clients/   Adding, checking, browsing, repairing and removing clients; sending settings, Run now,
+                    cancel, collecting runs and logs (sync.go); setup.sh runs on the client
+internal/clients/clienttest/  A fake client machine for tests: SSH server + the real pbcm-runner code
 internal/runner/    pbcm-runner's commands (detect, browse, uninstall) and its forced-command parser
 internal/sshx/      The server's SSH key, host key probing and pinning, running commands
 internal/auth/      Password hashing, TOTP, recovery codes, sign-in throttling
@@ -47,7 +51,7 @@ Browser ── HTTP(S) ──> sniffing listener(s) ──> Server.ServeHTTP
 
 `pbcm-runner` is always built for linux/amd64, because that's the only platform `proxmox-backup-client` supports. The release archives (for both server architectures) include it next to `pbcm`. The server reads it from beside its own executable, or from `PBCM_RUNNER`.
 
-The fake SSH host in `internal/clients/clients_test.go` is the quickest way to see a change to the setup flow working.
+`internal/clients/clienttest` runs the real pbcm-runner code behind a fake SSH server, with fake systemctl, systemd-creds and proxmox-backup-client, so server tests exercise real apply, run, cancel, status and log behaviour. It can also run on its own as a throwaway client for clicking through the UI.
 
 ## Running locally
 
@@ -78,7 +82,10 @@ Install the tools with `brew install go shellcheck` (or your package manager) an
 | `tlscert` | Self-signed certificates, mismatched or junk uploads |
 | `clients` | Over real SSH, against a fake Debian host run in the test. Covers: <ul><li>probing the host key</li><li>setup as root, as a sudo user (the password goes only to `sudo -S`), and with the server's key</li><li>refusing a host key that differs from the one checked</li><li>setup errors</li><li>duplicates</li><li>browse through the forced command</li><li>a changed host key blocking everything until repair</li><li>remove and uninstall</li></ul> |
 | `clients` (CI only) | `TestRealClient` sets up fresh Debian 13, 12 and Ubuntu 24.04 containers for real: installs `proxmox-backup-client` from Proxmox, then browses, repairs and uninstalls |
-| `runner` | Command splitting (round-trips with the server's quoting, ignores shell syntax), detect, browse, uninstall removing only its own files and keeping the account when the server shares the machine |
+| `bundle` | Schedules to systemd `OnCalendar=` and "next run" agreeing, bundle checks and hashing, error summaries |
+| `backups` | Destination and job checks (secrets kept when left blank), bundle building, the PBS wrapper against a fake client |
+| `clients` (CI only, `e2e` job) | `TestEndToEnd`: a client container and a **real Proxmox Backup Server** container, both booting systemd. Covers: <ul><li>setup</li><li>timers and `systemd-creds`-encrypted credentials</li><li>a real backup and its snapshot listed from the server</li><li>a missing folder</li><li>cancelling a slow backup</li><li>uninstall, including removal of the account</li></ul> |
+| `runner` | Apply (secrets never in `bundle.json`, timers added and removed), runs to several destinations with the right environment, failures, cancel, interrupted runs, history pruning, the backup command line. Also command splitting (round-trips with the server's quoting, ignores shell syntax), detect, browse, uninstall removing only its own files and keeping the account when the server shares the machine |
 | `server` | The real server on local ports. Covers: <ul><li>setup code and throttling</li><li>sign-in, cookies, CSRF header</li><li>two-step sign-in with replay and recovery codes</li><li>sessions surviving a restart</li><li>settings</li><li>base path and trusted proxies</li><li>HTTPS and the HTTP redirect</li><li>network changes confirmed, undone, timed out, blocked by a busy port</li><li>switching to an uploaded certificate on the same port</li></ul> |
 
 CI (`.github/workflows/ci.yml`) also installs the built package on an Ubuntu runner with systemd. It checks that the server answers over HTTPS and finishes setup through the API. Then it upgrades in place with a new port, and uninstalls with `--purge`.
