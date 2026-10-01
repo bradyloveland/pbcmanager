@@ -115,6 +115,23 @@ h3{font-size:15px;font-weight:620;margin:0 0 4px}
 .empty{padding:44px 24px;text-align:center}
 .empty p{color:var(--muted);max-width:52ch;margin:6px auto 18px}
 
+/* Dashboard widgets */
+.widgets{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;margin-bottom:22px}
+.widget{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+.widget-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.widget h2{margin:0;font-size:15px}
+.figure{margin:0;font-size:15px;color:var(--muted)}
+.figure b{font-size:24px;font-weight:650;color:var(--ink);letter-spacing:-.01em;margin-right:4px}
+.meter{height:10px;border-radius:5px;background:var(--surface-2);border:1px solid var(--line);overflow:hidden}
+.meter i{display:block;height:100%;background:var(--accent);border-radius:5px 0 0 5px}
+.meter.ok i{background:var(--ok)} .meter.warn i{background:var(--warn)} .meter.bad i{background:var(--bad)}
+.dest-row{display:flex;flex-direction:column;gap:6px}
+.dest-row + .dest-row{padding-top:12px;border-top:1px solid var(--line)}
+.dest-row .line{display:flex;justify-content:space-between;gap:10px;font-size:14px}
+.dest-row .line b{font-weight:600}
+.widget .foot{font-size:12.8px;color:var(--muted);margin-top:auto;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+@media (max-width:980px){.widgets{grid-template-columns:1fr}}
+
 /* Status pill */
 .pill{display:inline-block;font-size:12.5px;font-weight:600;border-radius:20px;padding:1px 10px;line-height:20px}
 .pill.success{background:var(--ok-soft);color:var(--ok)}
@@ -384,6 +401,15 @@ function bytes(n) {
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
   return `${n.toFixed(n < 10 && i ? 1 : 0)} ${u[i]}`;
 }
+function level(pct) { return pct >= 90 ? "bad" : pct >= 80 ? "warn" : "ok"; }
+function usageBlock(u, compact) {
+  if (!u) return `<span class="muted small">Not checked yet</span>`;
+  if (u.error) return `<span class="small" style="color:var(--bad)">${esc(u.error)}</span>`;
+  if (u.total == null) return `<span class="muted small">Connected; the server didn't report its size.</span>`;
+  const pct = u.total ? Math.round(u.used / u.total * 100) : 0;
+  return `<div class="meter ${level(pct)}" role="img" aria-label="${pct}% used"><i style="width:${Math.min(pct, 100)}%"></i></div>
+    <div class="${compact ? "sub" : "small muted"}">${bytes(u.avail)} free of ${bytes(u.total)} (${pct}% used)</div>`;
+}
 function schedText(s) {
   if (!s || s.type === "manual") return "Only when started by hand";
   const [hh, mm] = s.time.split(":");
@@ -547,7 +573,7 @@ function jobRow(j) {
   const active = (j.recent || [])[0] && ["running","queued"].includes(j.recent[0].status);
   return `<div class="jobrow ${j.enabled ? "" : "paused"}">
     <div><a class="jobname" href="#/jobs/${esc(j.id)}">${esc(j.name)}</a>
-      <div class="sub">${j.shares} folder${j.shares === 1 ? "" : "s"} to ${esc(j.target_name || "no destination")}</div></div>
+      <div class="sub">${j.shares} folder${j.shares === 1 ? "" : "s"} to ${esc(j.target_name || "no destination")}</div>${sizeLine(j.sizes)}</div>
     ${tape(j.recent)}
     ${jobState(j)}
     <div class="small">${nextText(j)}</div>
@@ -577,6 +603,8 @@ async function viewOverview(token) {
     else head = d.jobs.length === 1 ? "Your backup job is healthy" : `All ${d.jobs.length} backup jobs are healthy`;
     const banners = [];
     if (!d.client_version) banners.push(`<div class="banner bad"><b>proxmox-backup-client isn't installed.</b> Backups can't run until it is. Re-run the installer or install the <code>proxmox-backup-client</code> package.</div>`);
+    const noSecret = (d.destinations || []).filter(t => !t.secret_set);
+    if (noSecret.length) banners.push(`<div class="banner bad">${noSecret.map(t => `<a href="#/destinations/${esc(t.id)}">${esc(t.name)}</a>`).join(", ")} ${noSecret.length === 1 ? "needs its" : "need their"} token secret before backups can run.</div>`);
     if (!d.email_enabled && d.jobs.length) banners.push(`<div class="banner warn">Email alerts are off, so a failed backup won't notify anyone. <a href="#/alerts">Set up alerts</a></div>`);
     const body = !d.jobs.length
       ? `<div class="ledger empty"><h2>Set up your first backup</h2><p>${d.target_count ? "Pick the folders to protect and when to back them up." : "Start by adding the Proxmox Backup Server you want to back up to, then create a job for your folders."}</p>
@@ -585,11 +613,47 @@ async function viewOverview(token) {
           <div class="ledger-head"><div>Job</div><div>Last 20 runs, oldest to newest</div><div>Last result</div><div>Next run</div><div></div></div>
           ${d.jobs.map(jobRow).join("")}
         </div>`;
-    render(`<div class="health ${cls}"><span class="dot"></span><h1>${esc(head)}</h1></div>${banners.join("")}${body}`);
+    render(`<div class="health ${cls}"><span class="dot"></span><h1>${esc(head)}</h1></div>${banners.join("")}${d.jobs.length || d.target_count ? widgets(d) : ""}${body}`);
     bindRunButtons(draw);
+    $$("[data-refresh]", main).forEach(b => b.addEventListener("click", async () => {
+      b.disabled = true;
+      try { await api("POST", "/sizes/refresh", {what: b.dataset.refresh}); toast(b.dataset.refresh === "sources" ? "Measuring your folders. Large folders can take a few minutes." : "Checking destinations."); }
+      catch (ex) { toast(ex.message, "bad"); }
+      setTimeout(draw, 2500);
+    }));
   };
   await draw();
   poll(draw, 5000);
+}
+function widgets(d) {
+  const z = d.sizes || {};
+  let protectedHtml;
+  if (z.source_total == null && z.backup_total == null) {
+    protectedHtml = `<p class="figure">${z.measuring_sources ? "Measuring your folders…" : "Sizes appear after your folders are measured and the first backup finishes."}</p>`;
+  } else {
+    const pct = z.source_total ? Math.min(100, Math.round((z.backup_total || 0) / z.source_total * 100)) : 0;
+    protectedHtml = `<p class="figure"><b>${bytes(z.backup_total || 0)}</b> in your latest backups${z.source_total != null ? `, of ${bytes(z.source_total)} in your folders` : ""}</p>
+      ${z.source_total ? `<div class="meter" role="img" aria-label="${pct}% backed up"><i style="width:${pct}%"></i></div><div class="sub">Latest backups cover ${pct}% of the folder size. Excluded files count toward the folders but not the backups.</div>` : ""}
+      ${z.source_pending ? `<div class="sub">${z.source_pending} folder${z.source_pending === 1 ? " hasn't" : "s haven't"} been measured yet.</div>` : ""}`;
+  }
+  const dests = (d.destinations || []).map(t => `<div class="dest-row"><div class="line"><b><a class="jobname" href="#/destinations/${esc(t.id)}">${esc(t.name)}</a></b><span class="sub mono">${esc(t.datastore)}</span></div>${usageBlock(t.usage, true)}</div>`).join("")
+    || `<p class="figure">No destinations yet.</p>`;
+  const checked = (d.destinations || []).map(t => t.usage && t.usage.checked).filter(Boolean);
+  return `<section class="widgets" aria-label="Storage">
+    <div class="widget"><div class="widget-head"><h2>Data protected</h2></div>${protectedHtml}
+      <div class="foot"><span>${z.measuring_sources ? "Measuring folders now." : z.source_measured ? `Folders measured ${ago(z.source_measured)}.` : ""}</span>
+      <button class="linkbtn" data-refresh="sources" ${z.measuring_sources ? "disabled" : ""}>Measure again</button></div></div>
+    <div class="widget"><div class="widget-head"><h2>Destination space</h2></div>${dests}
+      <div class="foot"><span>${checked.length ? `Checked ${ago(Math.min(...checked))}.` : ""}</span><button class="linkbtn" data-refresh="destinations">Check now</button></div></div>
+  </section>`;
+}
+function sizeLine(z) {
+  if (!z) return "";
+  const parts = [];
+  if (z.backup_bytes != null && z.source_bytes != null) parts.push(`${bytes(z.backup_bytes)} of ${bytes(z.source_bytes)} backed up`);
+  else if (z.source_bytes != null) parts.push(`${bytes(z.source_bytes)} on disk`);
+  else if (z.measuring) parts.push("measuring…");
+  return parts.length ? `<div class="sub">${esc(parts.join(""))}</div>` : "";
 }
 function updateFailCount(n) {
   const el = $("#fail-count");
@@ -618,8 +682,9 @@ async function viewJobs(token) {
 }
 
 async function viewJobDetail(id, token) {
-  const [{jobs}, {targets}] = await Promise.all([api("GET", "/jobs"), api("GET", "/targets")]);
+  const [{jobs}, {targets}, ov] = await Promise.all([api("GET", "/jobs"), api("GET", "/targets"), api("GET", "/overview")]);
   const job = jobs.find(j => j.id === id);
+  const z = ((ov.jobs || []).find(j => j.id === id) || {}).sizes || {};
   if (!job) throw new Error("That job doesn't exist anymore.");
   const target = targets.find(t => t.id === job.target_id);
   if (token !== routeToken) return;
@@ -636,6 +701,8 @@ async function viewJobDetail(id, token) {
         <dl class="kv">
           <dt>Destination</dt><dd>${target ? `<a href="#/destinations/${esc(target.id)}">${esc(target.name)}</a><div class="sub mono">${esc(target.repository)}</div>` : "Missing"}</dd>
           <dt>Backup ID</dt><dd class="mono">${esc(job.backup_id)}</dd>
+          <dt>Folder size</dt><dd>${z.source_bytes != null ? `${bytes(z.source_bytes)}${z.source_complete ? "" : " so far"}<div class="sub">Measured ${esc(ago(z.source_measured))}</div>` : z.measuring ? "Measuring…" : `<span class="muted">Not measured yet</span>`}${(z.source_errors || []).map(e => `<div class="sub" style="color:var(--bad)">${esc(e)}</div>`).join("")}</dd>
+          <dt>Latest backup</dt><dd>${z.backup_error ? `<span style="color:var(--bad)">${esc(z.backup_error)}</span>` : z.backup_time ? `${bytes(z.backup_bytes)}<div class="sub">${esc(fmtTime(z.backup_time))}, ${z.snapshot_count} snapshot${z.snapshot_count === 1 ? "" : "s"} kept</div>` : `<span class="muted">None yet</span>`}</dd>
           <dt>Folders</dt><dd>${job.shares.map(s => `<div><span class="mono">${esc(s.path)}</span><div class="sub">saved as ${esc(s.archive)}.pxar</div></div>`).join("")}</dd>
           <dt>Excluded</dt><dd>${job.excludes.length ? job.excludes.map(e => `<div class="mono">${esc(e)}</div>`).join("") : `<span class="muted">Nothing</span>`}</dd>
           <dt>Change detection</dt><dd>${esc({metadata:"Metadata (fastest)", data:"Data", legacy:"Legacy"}[job.change_detection_mode])}</dd>
@@ -846,13 +913,14 @@ async function viewTargets(token) {
     ${targets.length ? `<div class="destlist">${targets.map(t => {
       const n = jobs.filter(j => j.target_id === t.id).length;
       return `<div class="panel dest"><div><h3><a class="jobname" href="#/destinations/${esc(t.id)}">${esc(t.name)}</a></h3>
-        <div class="sub mono">${esc(t.repository)}</div><div class="sub">${n ? `Used by ${n} job${n === 1 ? "" : "s"}` : "Not used by any job"}${t.fingerprint ? "" : ", no fingerprint saved"}</div></div>
+        <div class="sub mono">${esc(t.repository)}</div><div class="sub">${n ? `Used by ${n} job${n === 1 ? "" : "s"}` : "Not used by any job"}${t.fingerprint ? "" : ", no fingerprint saved"}</div>
+        ${t.secret_set ? "" : `<span class="pill failed" style="margin-top:6px">Token secret needed</span>`}</div>
         <div class="btnrow"><button class="btn small" data-check="${esc(t.id)}">Check connection</button><a class="btn small" href="#/destinations/${esc(t.id)}">Edit</a></div>
-        <div class="usage hidden" id="u-${esc(t.id)}"></div></div>`;}).join("")}</div>`
+        <div class="usage" id="u-${esc(t.id)}">${usageBlock(t.usage)}${t.usage && t.usage.checked ? `<div class="sub">Checked ${esc(ago(t.usage.checked))}</div>` : ""}</div></div>`;}).join("")}</div>`
       : `<div class="panel empty"><h2>No destinations yet</h2><p>Add the PBS server and datastore you created, plus the API token you made for this machine.</p><a class="btn primary" href="#/destinations/new">Add a destination</a></div>`}`);
   $$("[data-check]", main).forEach(b => b.addEventListener("click", async () => {
     const t = targets.find(x => x.id === b.dataset.check), box = $(`#u-${t.id}`);
-    b.disabled = true; box.classList.remove("hidden"); box.innerHTML = "Connecting…";
+    b.disabled = true; box.innerHTML = "Connecting…";
     try { box.innerHTML = usageHtml(await api("POST", "/targets/test", {...t, secret: ""})); }
     catch (ex) { box.innerHTML = `<div class="result bad">${esc(ex.message)}</div>`; }
     finally { b.disabled = false; }
@@ -861,7 +929,7 @@ async function viewTargets(token) {
 function usageHtml(r) {
   if (r.total == null) return `<div class="result ok">Connected. The datastore answered.</div>`;
   const pct = r.total ? Math.round(r.used / r.total * 100) : 0;
-  return `<div class="bar"><i style="width:${pct}%"></i></div><div>Connected. ${bytes(r.used)} of ${bytes(r.total)} used (${pct}%), ${bytes(r.avail)} free.</div>`;
+  return `<div class="meter ${level(pct)}"><i style="width:${Math.min(pct, 100)}%"></i></div><div>Connected. ${bytes(r.used)} of ${bytes(r.total)} used (${pct}%), ${bytes(r.avail)} free.</div>`;
 }
 
 async function viewTargetForm(id, token) {
@@ -1066,6 +1134,11 @@ async function viewAccount(token) {
       <div id="p-result"></div>
       <div class="formfoot"><button class="btn primary" type="submit">Change password</button></div>
     </form>
+    <div class="panel"><h2>Export and import settings</h2>
+      <p class="hint" style="margin:0 0 14px;max-width:72ch">Save your destinations, backup jobs, schedules, email alert settings and server options to a file, to keep as a backup or to set up another machine. Credentials are left out: token secrets, the email password, key file passwords and your sign-in details stay on this machine.</p>
+      <div class="btnrow"><button class="btn" id="cfg-export">Export settings</button>
+        <label class="btn">Import settings…<input type="file" id="cfg-file" accept=".json,application/json" hidden></label></div>
+      <div id="cfg-result"></div></div>
     <div class="panel"><h2>This machine</h2><dl class="kv">
       <dt>Backup client</dt><dd>${o.client_version ? `proxmox-backup-client ${esc(o.client_version)}` : `<span style="color:var(--bad)">Not installed</span>`}</dd>
       <dt>Manager version</dt><dd>${esc(session.version)}</dd>
@@ -1154,6 +1227,48 @@ async function viewAccount(token) {
     };
   };
   drawTwofa(acct);
+
+  $("#cfg-export").onclick = async () => {
+    try {
+      const data = await api("GET", "/config/export");
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2) + "\n"], {type: "application/json"}));
+      a.download = `pbs-manager-settings-${session.host}-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.append(a); a.click(); a.remove();
+      toast("Settings exported.");
+    } catch (ex) { toast(ex.message, "bad"); }
+  };
+  $("#cfg-file").onchange = async e => {
+    const file = e.target.files[0]; e.target.value = "";
+    const box = $("#cfg-result");
+    if (!file) return;
+    let config;
+    try { config = JSON.parse(await file.text()); }
+    catch (_) { box.innerHTML = `<div class="result bad">That file isn't valid JSON.</div>`; return; }
+    const list = (label, items) => items && items.length ? `<li>${label}: ${items.map(esc).join(", ")}</li>` : "";
+    try {
+      const {summary: s} = await api("POST", "/config/import", {config, apply: false});
+      box.innerHTML = `<div class="subform"><h3>Import ${esc(file.name)}?</h3>
+        <p class="hint" style="margin:4px 0 10px">${s.exported_from ? `Exported from ${esc(s.exported_from)}${s.exported_at ? " on " + esc(new Date(s.exported_at).toLocaleString()) : ""}. ` : ""}This replaces the current destinations, jobs and email alert settings. Run history is kept.</p>
+        <ul class="steps">
+          <li>${s.targets} destination${s.targets === 1 ? "" : "s"} and ${s.jobs} job${s.jobs === 1 ? "" : "s"}</li>
+          ${list("Will need a token secret", s.needs_secret)}${list("Will need a key file password", s.needs_keyfile_password)}
+          ${s.email_password_needed ? "<li>The email password will need to be entered</li>" : ""}
+          ${list("Destinations removed", s.removed_targets)}${list("Jobs removed", s.removed_jobs)}
+        </ul>
+        <div class="btnrow"><button class="btn danger" id="cfg-apply">Replace current settings</button><button class="btn" id="cfg-cancel">Cancel</button></div></div>`;
+      $("#cfg-cancel").onclick = () => { box.innerHTML = ""; };
+      $("#cfg-apply").onclick = async () => {
+        try {
+          await api("POST", "/config/import", {config, apply: true});
+          const todo = [...(s.needs_secret.length ? ["enter token secrets under <a href='#/destinations'>Destinations</a>"] : []),
+            ...(s.email_password_needed ? ["enter the password under <a href='#/alerts'>Email alerts</a>"] : []),
+            ...(s.needs_keyfile_password.length ? ["enter key file passwords in the affected jobs"] : [])];
+          box.innerHTML = `<div class="result ok">Settings imported.${todo.length ? " Next, " + todo.join(", then ") + "." : ""}</div>`;
+        } catch (ex) { box.innerHTML = `<div class="result bad">${esc(ex.message)}</div>`; }
+      };
+    } catch (ex) { box.innerHTML = `<div class="result bad">${esc(ex.message)}</div>`; }
+  };
 
   const uf = $("#uform");
   uf.addEventListener("submit", async e => {

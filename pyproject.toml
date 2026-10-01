@@ -1,0 +1,8 @@
+# Tool configuration only; the app itself has no dependencies or build step.
+[tool.ruff]
+line-length = 120
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B"]
+ignore = ["E501"]

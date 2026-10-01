@@ -41,17 +41,28 @@ from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, APP_DIR)
 from qr import qr_svg  # noqa: E402
 
 STATIC_DIR = os.path.join(APP_DIR, "static")
-CONFIG_DIR = os.environ.get("PBSM_CONFIG_DIR", "/etc/pbs-manager")
-DATA_DIR = os.environ.get("PBSM_DATA_DIR", "/var/lib/pbs-manager")
-CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
-RUNS_PATH = os.path.join(DATA_DIR, "runs.json")
-LOG_DIR = os.path.join(DATA_DIR, "logs")
+CONFIG_DIR = CONFIG_PATH = DATA_DIR = RUNS_PATH = SIZES_PATH = LOG_DIR = ""
+
+
+def configure_paths(config_dir=None, data_dir=None):
+    """Point the app at its settings and data directories. Defaults come from
+    PBSM_CONFIG_DIR / PBSM_DATA_DIR, then the standard system locations."""
+    global CONFIG_DIR, CONFIG_PATH, DATA_DIR, RUNS_PATH, SIZES_PATH, LOG_DIR
+    CONFIG_DIR = config_dir or os.environ.get("PBSM_CONFIG_DIR", "/etc/pbs-manager")
+    DATA_DIR = data_dir or os.environ.get("PBSM_DATA_DIR", "/var/lib/pbs-manager")
+    CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
+    RUNS_PATH = os.path.join(DATA_DIR, "runs.json")
+    SIZES_PATH = os.path.join(DATA_DIR, "sizes.json")
+    LOG_DIR = os.path.join(DATA_DIR, "logs")
+
+
+configure_paths()
 SESSION_COOKIE = "pbsm_session"
 SESSION_TTL = 12 * 3600
 HOSTNAME = socket.gethostname()
@@ -277,12 +288,12 @@ def to_int(value, label, lo, hi, default=None):
     try:
         n = int(value)
     except (TypeError, ValueError):
-        raise ApiError(400, f"{label} must be a whole number.")
+        raise ApiError(400, f"{label} must be a whole number.") from None
     require(lo <= n <= hi, f"{label} must be between {lo} and {hi}.")
     return n
 
 
-def clean_target(inp, existing=None):
+def clean_target(inp, existing=None, require_secret=True):
     t = {"id": existing["id"] if existing else uuid.uuid4().hex[:12]}
     t["name"] = get_str(inp, "name")
     require(t["name"] and NAME_RE.match(t["name"]), "Give the destination a name (up to 64 characters).")
@@ -299,7 +310,8 @@ def clean_target(inp, existing=None):
     secret = inp.get("secret") or ""
     require(isinstance(secret, str), "Secret must be text.")
     t["secret"] = secret if secret else (existing or {}).get("secret", "")
-    require(t["secret"], "Enter the API token secret (or the user's password if you aren't using a token).")
+    if require_secret:
+        require(t["secret"], "Enter the API token secret (or the user's password if you aren't using a token).")
     fp = get_str(inp, "fingerprint").lower()
     require(not fp or FP_RE.match(fp),
             "The fingerprint should be 32 pairs of hex digits separated by colons.")
@@ -321,6 +333,8 @@ def public_target(t):
     out = {k: v for k, v in t.items() if k != "secret"}
     out["secret_set"] = bool(t.get("secret"))
     out["repository"] = repository(t)
+    if APP is not None:
+        out["usage"] = APP.sizes.target_usage(t["id"])
     return out
 
 
@@ -348,12 +362,13 @@ def clean_schedule(inp):
     return s
 
 
-def clean_job(inp, cfg, existing=None):
+def clean_job(inp, cfg, existing=None, target_ids=None):
     j = {"id": existing["id"] if existing else uuid.uuid4().hex[:12]}
     j["name"] = get_str(inp, "name")
     require(j["name"] and NAME_RE.match(j["name"]), "Give the job a name (up to 64 characters).")
     j["target_id"] = get_str(inp, "target_id")
-    require(cfg.find("targets", j["target_id"]), "Choose where this job backs up to.")
+    known = target_ids if target_ids is not None else {t["id"] for t in cfg.snapshot()["targets"]}
+    require(j["target_id"] in known, "Choose where this job backs up to.")
     j["backup_id"] = get_str(inp, "backup_id") or HOSTNAME
     require(BACKUP_ID_RE.match(j["backup_id"]),
             "The backup ID can use letters, numbers, dots, dashes and underscores.")
@@ -494,12 +509,12 @@ class Scheduler(threading.Thread):
         return next_run_time(job, now())
 
     def run(self):
-        while True:
+        while not self.app.stopping.is_set():
             try:
                 self.tick()
             except Exception:
                 log.exception("Scheduler tick failed")
-            time.sleep(15)
+            self.app.stopping.wait(15)
 
     def tick(self):
         t = now()
@@ -700,8 +715,11 @@ class Runner:
             threading.Thread(target=force_kill, daemon=True).start()
 
     def _worker(self):
-        while True:
-            run_id = self.q.get()
+        while not self.app.stopping.is_set():
+            try:
+                run_id = self.q.get(timeout=1)
+            except queue.Empty:
+                continue
             try:
                 run = self.app.runs.get(run_id)
                 if run and run["status"] == "queued":
@@ -728,6 +746,9 @@ class Runner:
                     raise RunError("The job was deleted before it could run.")
                 if not target:
                     raise RunError("This job's destination no longer exists. Edit the job and choose one.")
+                if not target.get("secret"):
+                    raise RunError(f"The destination {target['name']} has no token secret saved. "
+                                   "Edit the destination and enter it.")
                 binary = build_backup_cmd(job)[0]
                 if not os.path.exists(binary):
                     raise RunError("proxmox-backup-client isn't installed on this machine.")
@@ -753,6 +774,7 @@ class Runner:
                     status, summary = "cancelled", "Cancelled while running."
                 elif rc == 0:
                     status, summary = "success", "Backup finished."
+                    self.app.sizes.request(jobs=[job["id"]], targets=[target["id"]])
                 else:
                     status = "failed"
                     summary = summarize_error(tail_file(log_path))
@@ -854,11 +876,370 @@ class Notifier:
 
 
 # --------------------------------------------------------------------------
+# Sizes: source folders, latest backups, destination space
+# --------------------------------------------------------------------------
+
+def measure_folder(path):
+    """Apparent size in bytes of everything under `path`, staying on one
+    filesystem (like pxar). Uses `du` at idle priority, with a pure-Python
+    fallback for systems whose du lacks -b (e.g. BusyBox)."""
+    du = shutil.which("du")
+    if du:
+        prefix = []
+        if shutil.which("ionice"):
+            prefix += ["ionice", "-c3"]
+        if shutil.which("nice"):
+            prefix += ["nice", "-n", "19"]
+        try:
+            out = subprocess.run(prefix + [du, "-sxb", "--", path], capture_output=True,
+                                 text=True, timeout=6 * 3600, stdin=subprocess.DEVNULL)
+            # du exits 1 when it couldn't read some entries but still prints a total.
+            first = (out.stdout or "").split()
+            if out.returncode in (0, 1) and first and first[0].isdigit():
+                return int(first[0])
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return walk_size(path)
+
+
+def walk_size(path):
+    total = 0
+    root_dev = os.stat(path).st_dev
+    stack = [path]
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as it:
+                for entry in it:
+                    try:
+                        st = entry.stat(follow_symlinks=False)
+                        if entry.is_dir(follow_symlinks=False):
+                            if st.st_dev == root_dev:
+                                stack.append(entry.path)
+                        else:
+                            total += st.st_size
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return total
+
+
+def top_level_paths(paths):
+    """Drop paths nested inside another path in the list, so totals don't
+    count the same data twice."""
+    paths = sorted(set(paths))
+    return [p for p in paths
+            if not any(q != p and p.startswith(q.rstrip("/") + "/") for q in paths)]
+
+
+class SizeTracker(threading.Thread):
+    """Keeps a cache of sizes the dashboard shows, refreshed in the background:
+    destination space (every 15 min), latest snapshot size per job (hourly and
+    after each successful run) and source folder size (every 12 h)."""
+
+    TARGET_EVERY = 15 * 60
+    SNAPSHOT_EVERY = 3600
+    SOURCE_EVERY = 12 * 3600
+    START_DELAY = 3
+
+    def __init__(self, app):
+        super().__init__(daemon=True, name="sizes")
+        self.app = app
+        self.lock = threading.RLock()
+        self.wake = threading.Event()
+        self.state = {"sources": {}, "snapshots": {}, "targets": {}}
+        self.forced = {"sources": set(), "snapshots": set(), "targets": set()}
+        self.busy = set()
+        try:
+            with open(SIZES_PATH) as f:
+                loaded = json.load(f)
+            for key in self.state:
+                if isinstance(loaded.get(key), dict):
+                    self.state[key] = loaded[key]
+        except (OSError, ValueError):
+            pass
+
+    # -- requests ---------------------------------------------------------
+    def request(self, sources=None, jobs=None, targets=None):
+        """Ask for a refresh. Pass ids/paths, or "*" for all of a kind."""
+        with self.lock:
+            for kind, items in (("sources", sources), ("snapshots", jobs), ("targets", targets)):
+                if items == "*":
+                    self.forced[kind].add("*")
+                elif items:
+                    self.forced[kind].update(items)
+        self.wake.set()
+
+    def _due(self, kind, key, stamp, every):
+        with self.lock:
+            forced = "*" in self.forced[kind] or key in self.forced[kind]
+            self.forced[kind].discard(key)
+        return forced or (now() - (stamp or 0)) > every
+
+    # -- loop ---------------------------------------------------------------
+    def run(self):
+        if self.app.stopping.wait(self.START_DELAY):
+            return
+        while not self.app.stopping.is_set():
+            try:
+                self.tick()
+            except Exception:
+                log.exception("Size refresh failed")
+            self.wake.wait(60)
+            self.wake.clear()
+
+    def tick(self):
+        cfg = self.app.cfg.snapshot()
+        targets = {t["id"]: t for t in cfg["targets"]}
+        for target in cfg["targets"]:
+            st = self.state["targets"].get(target["id"], {})
+            if self._due("targets", target["id"], st.get("checked"), self.TARGET_EVERY):
+                self._measure_target(target)
+        for job in cfg["jobs"]:
+            st = self.state["snapshots"].get(job["id"], {})
+            target = targets.get(job["target_id"])
+            if target and self._due("snapshots", job["id"], st.get("checked"), self.SNAPSHOT_EVERY):
+                self._measure_snapshot(job, target)
+        paths = {s["path"] for j in cfg["jobs"] for s in j["shares"]}
+        for path in sorted(paths):
+            st = self.state["sources"].get(path, {})
+            if self._due("sources", path, st.get("measured"), self.SOURCE_EVERY):
+                self._measure_source(path)
+        with self.lock:
+            for kind in self.forced:
+                self.forced[kind].discard("*")
+            self.state["targets"] = {k: v for k, v in self.state["targets"].items() if k in targets}
+            self.state["snapshots"] = {k: v for k, v in self.state["snapshots"].items()
+                                       if any(j["id"] == k for j in cfg["jobs"])}
+            self.state["sources"] = {k: v for k, v in self.state["sources"].items() if k in paths}
+            self._save()
+
+    def _save(self):
+        try:
+            write_json_atomic(SIZES_PATH, self.state)
+        except OSError:
+            log.exception("Could not save size cache")
+
+    def _set(self, kind, key, value):
+        with self.lock:
+            self.state[kind][key] = value
+            self._save()
+
+    # -- measurements -------------------------------------------------------
+    def _measure_target(self, target):
+        entry = {"checked": now(), "total": None, "used": None, "avail": None, "error": ""}
+        if not target.get("secret"):
+            entry["error"] = "No token secret saved."
+        else:
+            self.busy.add(("target", target["id"]))
+            try:
+                data = json.loads(run_client(target, ["status", "--output-format", "json"], timeout=45) or "{}")
+                entry.update(total=data.get("total"), used=data.get("used"), avail=data.get("avail"))
+            except ApiError as exc:
+                entry["error"] = exc.message
+            except ValueError:
+                entry["error"] = "The server sent an unexpected reply."
+            finally:
+                self.busy.discard(("target", target["id"]))
+        self._set("targets", target["id"], entry)
+
+    def _measure_snapshot(self, job, target):
+        entry = {"checked": now(), "bytes": None, "time": None, "count": 0, "error": ""}
+        if not target.get("secret"):
+            entry["error"] = "No token secret saved."
+        else:
+            self.busy.add(("snapshot", job["id"]))
+            try:
+                out = run_client(target, ["snapshot", "list", f"host/{job['backup_id']}",
+                                          "--output-format", "json"], timeout=60)
+                items = json.loads(out or "[]")
+                items = [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+                entry["count"] = len(items)
+                if items:
+                    newest = max(items, key=lambda i: i.get("backup-time") or 0)
+                    entry.update(bytes=newest.get("size"), time=newest.get("backup-time"))
+                else:
+                    entry["bytes"] = 0
+            except ApiError as exc:
+                entry["error"] = exc.message
+            except ValueError:
+                entry["error"] = "The server sent an unexpected reply."
+            finally:
+                self.busy.discard(("snapshot", job["id"]))
+        self._set("snapshots", job["id"], entry)
+
+    def _measure_source(self, path):
+        entry = {"measured": now(), "bytes": None, "error": ""}
+        if not os.path.isdir(path):
+            entry["error"] = "Folder not found or not mounted."
+        else:
+            self.busy.add(("source", path))
+            started = now()
+            try:
+                entry["bytes"] = measure_folder(path)
+                entry["seconds"] = round(now() - started, 1)
+            except OSError as exc:
+                entry["error"] = str(exc)
+            finally:
+                self.busy.discard(("source", path))
+        self._set("sources", path, entry)
+
+    # -- views --------------------------------------------------------------
+    def target_usage(self, target_id):
+        with self.lock:
+            st = self.state["targets"].get(target_id)
+            return dict(st) if st else None
+
+    def summary(self, cfg):
+        with self.lock:
+            sources = copy.deepcopy(self.state["sources"])
+            snaps = copy.deepcopy(self.state["snapshots"])
+            busy = set(self.busy)
+        jobs = {}
+        for job in cfg["jobs"]:
+            known = [sources[s["path"]] for s in job["shares"]
+                     if sources.get(s["path"], {}).get("bytes") is not None]
+            snap = snaps.get(job["id"], {})
+            jobs[job["id"]] = {
+                "source_bytes": sum(x["bytes"] for x in known) if known else None,
+                "source_complete": len(known) == len(job["shares"]),
+                "source_measured": min((x["measured"] for x in known), default=None),
+                "source_errors": [f"{s['path']}: {sources[s['path']]['error']}" for s in job["shares"]
+                                  if sources.get(s["path"], {}).get("error")],
+                "measuring": any(("source", s["path"]) in busy for s in job["shares"]),
+                "backup_bytes": snap.get("bytes"), "backup_time": snap.get("time"),
+                "snapshot_count": snap.get("count", 0), "backup_error": snap.get("error", ""),
+            }
+        top = top_level_paths(s["path"] for j in cfg["jobs"] for s in j["shares"])
+        measured = [sources[p] for p in top if sources.get(p, {}).get("bytes") is not None]
+        return {
+            "jobs": jobs,
+            "source_total": sum(x["bytes"] for x in measured) if measured else None,
+            "source_pending": len(top) - len(measured),
+            "source_measured": min((x["measured"] for x in measured), default=None),
+            "backup_total": sum(j["backup_bytes"] or 0 for j in jobs.values()) if any(
+                j["backup_bytes"] is not None for j in jobs.values()) else None,
+            "measuring_sources": any(k == "source" for k, _ in busy),
+        }
+
+
+# --------------------------------------------------------------------------
+# Export / import (everything except credentials)
+# --------------------------------------------------------------------------
+
+EXPORT_FORMAT = "pbs-manager-config"
+EXPORT_VERSION = 1
+ID_RE = re.compile(r"^\w{1,32}$")
+
+
+def export_config(data):
+    """Return a shareable copy of the configuration with every credential
+    removed: sign-in details, token secrets, the SMTP password and key file
+    passwords."""
+    return {
+        "format": EXPORT_FORMAT,
+        "format_version": EXPORT_VERSION,
+        "app_version": VERSION,
+        "exported_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        "exported_from": HOSTNAME,
+        "note": ("Credentials are not included. After importing, re-enter each destination's "
+                 "token secret, the email password and any key file passwords."),
+        "settings": copy.deepcopy(data.get("settings", {})),
+        "server": {k: v for k, v in data.get("server", {}).items()},
+        "email": {k: v for k, v in data.get("email", {}).items() if k != "password"},
+        "targets": [{k: v for k, v in t.items() if k != "secret"} for t in data.get("targets", [])],
+        "jobs": [{k: v for k, v in j.items() if k != "keyfile_password"} for j in data.get("jobs", [])],
+    }
+
+
+def build_import(current, data):
+    """Validate an export against the current configuration. Returns the new
+    targets, jobs, email and settings plus a summary for the user. Secrets
+    already saved here are kept for destinations and jobs with the same id."""
+    require(isinstance(data, dict) and data.get("format") == EXPORT_FORMAT,
+            "This file isn't a PBS Backup Manager settings export.")
+    try:
+        version = int(data.get("format_version", 0))
+    except (TypeError, ValueError):
+        version = 0
+    require(1 <= version <= EXPORT_VERSION,
+            "This export was made by a newer version of PBS Backup Manager. Upgrade this machine first.")
+    raw_targets, raw_jobs = data.get("targets") or [], data.get("jobs") or []
+    require(isinstance(raw_targets, list) and isinstance(raw_jobs, list), "The export is damaged.")
+
+    old_targets = {t["id"]: t for t in current["targets"]}
+    old_jobs = {j["id"]: j for j in current["jobs"]}
+    targets, ids = [], set()
+    for raw in raw_targets:
+        require(isinstance(raw, dict), "The export is damaged.")
+        tid = str(raw.get("id") or "")
+        tid = tid if ID_RE.match(tid) and tid not in ids else uuid.uuid4().hex[:12]
+        old = old_targets.get(tid, {})
+        try:
+            t = clean_target(raw, {"id": tid, "secret": old.get("secret", "")}, require_secret=False)
+        except ApiError as exc:
+            raise ApiError(400, f"Destination “{raw.get('name', '?')}”: {exc.message}") from None
+        targets.append(t)
+        ids.add(tid)
+
+    jobs, job_ids = [], set()
+    for raw in raw_jobs:
+        require(isinstance(raw, dict), "The export is damaged.")
+        jid = str(raw.get("id") or "")
+        jid = jid if ID_RE.match(jid) and jid not in job_ids else uuid.uuid4().hex[:12]
+        old = old_jobs.get(jid, {})
+        try:
+            j = clean_job(raw, None, {"id": jid, "keyfile_password": old.get("keyfile_password", "")},
+                          target_ids=ids)
+        except ApiError as exc:
+            raise ApiError(400, f"Job “{raw.get('name', '?')}”: {exc.message}") from None
+        jobs.append(j)
+        job_ids.add(jid)
+
+    email = current["email"]
+    if isinstance(data.get("email"), dict):
+        try:
+            email = clean_email(data["email"], current["email"])
+        except ApiError as exc:
+            raise ApiError(400, f"Email alerts: {exc.message}") from None
+
+    settings = dict(current["settings"])
+    raw_settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
+    if "max_concurrent" in raw_settings:
+        settings["max_concurrent"] = to_int(raw_settings["max_concurrent"], "max_concurrent", 1, 16)
+    if "keep_runs" in raw_settings:
+        settings["keep_runs"] = to_int(raw_settings["keep_runs"], "keep_runs", 20, 100_000)
+
+    summary = {
+        "targets": len(targets), "jobs": len(jobs),
+        "needs_secret": [t["name"] for t in targets if not t["secret"]],
+        "needs_keyfile_password": [j["name"] for j in jobs if j.get("keyfile") and not j.get("keyfile_password")],
+        "removed_targets": [t["name"] for tid, t in old_targets.items() if tid not in ids],
+        "removed_jobs": [j["name"] for jid, j in old_jobs.items() if jid not in job_ids],
+        "email_password_needed": bool(email.get("enabled") and email.get("username") and not email.get("password")),
+        "exported_from": data.get("exported_from"), "exported_at": data.get("exported_at"),
+    }
+    return {"targets": targets, "jobs": jobs, "email": email, "settings": settings}, summary
+
+
+def apply_import(app, result):
+    with app.cfg.lock:
+        app.cfg.data.update(targets=result["targets"], jobs=result["jobs"],
+                            email=result["email"], settings=result["settings"])
+        app.cfg.save()
+    for job in result["jobs"]:
+        app.scheduler.reset(job["id"])
+    app.sizes.request(sources="*", jobs="*", targets="*")
+
+
+# --------------------------------------------------------------------------
 # Application state
 # --------------------------------------------------------------------------
 
 class App:
     def __init__(self):
+        self.stopping = threading.Event()
         os.makedirs(DATA_DIR, mode=0o700, exist_ok=True)
         os.makedirs(LOG_DIR, mode=0o700, exist_ok=True)
         self.cfg = Config(CONFIG_PATH)
@@ -878,6 +1259,20 @@ class App:
         self.runner = Runner(self, int(settings.get("max_concurrent", 1)))
         self.scheduler = Scheduler(self)
         self.scheduler.start()
+        self.sizes = SizeTracker(self)
+        self.sizes.start()
+
+    def stop(self):
+        """Stop background threads (used on shutdown and by the test suite)."""
+        self.stopping.set()
+        self.sizes.wake.set()
+        with self.runner.lock:
+            procs = list(self.runner.procs.values())
+        for proc in procs:
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
 
     def _recover_interrupted(self):
         for run in self.runs.list(limit=10_000, statuses=("queued", "running")):
@@ -995,7 +1390,7 @@ def run_client(target, args, timeout):
         out = subprocess.run([binary] + args, capture_output=True, text=True, timeout=timeout,
                              stdin=subprocess.DEVNULL, env=client_env(target))
     except subprocess.TimeoutExpired:
-        raise ApiError(504, f"The PBS server didn't answer within {timeout} seconds.")
+        raise ApiError(504, f"The PBS server didn't answer within {timeout} seconds.") from None
     if out.returncode != 0:
         raise ApiError(502, summarize_error((out.stderr or "") + "\n" + (out.stdout or "")))
     return out.stdout
@@ -1228,11 +1623,44 @@ def api_overview(h, body, qs):
             "last_success_at": last_ok and last_ok.get("ended"),
             "next_run": APP.scheduler.next_for(job),
         })
+    sizes = APP.sizes.summary(cfg)
+    for j in jobs:
+        j["sizes"] = sizes["jobs"].get(j["id"], {})
+    destinations = [{"id": t["id"], "name": t["name"], "datastore": t["datastore"],
+                     "secret_set": bool(t.get("secret")), "usage": APP.sizes.target_usage(t["id"])}
+                    for t in cfg["targets"]]
+    sizes.pop("jobs", None)
     return {
         "jobs": jobs, "target_count": len(cfg["targets"]), "host": HOSTNAME,
         "client_version": APP.client_version, "email_enabled": cfg["email"].get("enabled", False),
-        "now": now(),
+        "sizes": sizes, "destinations": destinations, "now": now(),
     }
+
+
+@route("POST", r"/api/sizes/refresh")
+def api_sizes_refresh(h, body, qs):
+    what = get_str(body, "what", "all") or "all"
+    require(what in ("all", "sources", "destinations", "backups"), "Unknown refresh type.")
+    APP.sizes.request(sources="*" if what in ("all", "sources") else None,
+                      jobs="*" if what in ("all", "backups") else None,
+                      targets="*" if what in ("all", "destinations") else None)
+    return {"ok": True}
+
+
+@route("GET", r"/api/config/export")
+def api_config_export(h, body, qs):
+    return export_config(APP.cfg.snapshot())
+
+
+@route("POST", r"/api/config/import")
+def api_config_import(h, body, qs):
+    result, summary = build_import(APP.cfg.snapshot(), body.get("config"))
+    if body.get("apply"):
+        if APP.runs.list(limit=1, statuses=("queued", "running")):
+            raise ApiError(409, "A backup is running or waiting. Import once it finishes.")
+        apply_import(APP, result)
+        log.info("Imported settings: %d destinations, %d jobs", summary["targets"], summary["jobs"])
+    return {"applied": bool(body.get("apply")), "summary": summary}
 
 
 @route("GET", r"/api/targets")
@@ -1246,6 +1674,7 @@ def api_target_create(h, body, qs):
     with APP.cfg.lock:
         APP.cfg.data["targets"].append(t)
         APP.cfg.save()
+    APP.sizes.request(targets=[t["id"]])
     return {"target": public_target(t)}
 
 
@@ -1258,6 +1687,7 @@ def api_target_update(h, body, qs, tid):
     with APP.cfg.lock:
         APP.cfg.data["targets"] = [t if x["id"] == tid else x for x in APP.cfg.data["targets"]]
         APP.cfg.save()
+    APP.sizes.request(targets=[tid], jobs=[j["id"] for j in APP.cfg.snapshot()["jobs"] if j["target_id"] == tid])
     return {"target": public_target(t)}
 
 
@@ -1296,6 +1726,7 @@ def api_job_create(h, body, qs):
         APP.cfg.data["jobs"].append(j)
         APP.cfg.save()
     APP.scheduler.reset(j["id"])
+    APP.sizes.request(sources=[s["path"] for s in j["shares"]], jobs=[j["id"]])
     return {"job": public_job(j)}
 
 
@@ -1309,6 +1740,8 @@ def api_job_update(h, body, qs, jid):
         APP.cfg.data["jobs"] = [j if x["id"] == jid else x for x in APP.cfg.data["jobs"]]
         APP.cfg.save()
     APP.scheduler.reset(jid)
+    new_paths = {s["path"] for s in j["shares"]} - {s["path"] for s in existing["shares"]}
+    APP.sizes.request(sources=sorted(new_paths), jobs=[jid])
     return {"job": public_job(j)}
 
 
@@ -1426,7 +1859,7 @@ def api_email_test(h, body, qs):
             f"This is a test from PBS Backup Manager on {HOSTNAME}.\n\n"
             "If you received it, backup alerts will reach this address.\n", settings=e)
     except Exception as exc:
-        raise ApiError(502, f"Couldn't send the email: {exc}")
+        raise ApiError(502, f"Couldn't send the email: {exc}") from None
     return {"ok": True}
 
 
@@ -1446,7 +1879,7 @@ def api_browse(h, body, qs):
                 except OSError:
                     continue
     except PermissionError:
-        raise ApiError(403, f"Can't read {path}.")
+        raise ApiError(403, f"Can't read {path}.") from None
     dirs.sort(key=str.lower)
     parent = os.path.dirname(path) if path != "/" else None
     return {"path": path, "parent": parent, "dirs": dirs[:1000]}
@@ -1565,7 +1998,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             data = json.loads(raw)
         except ValueError:
-            raise ApiError(400, "Invalid JSON.")
+            raise ApiError(400, "Invalid JSON.") from None
         if not isinstance(data, dict):
             raise ApiError(400, "Expected a JSON object.")
         return data
@@ -1721,6 +2154,44 @@ def cmd_totp_reset(args):
     print("Two-step verification is off. Sign in with your password and set it up again from Account.")
 
 
+def cmd_export(args):
+    data = export_config(Config(CONFIG_PATH).snapshot())
+    text = json.dumps(data, indent=2) + "\n"
+    if args.output and args.output != "-":
+        with open(args.output, "w") as f:
+            f.write(text)
+        print(f"Settings exported to {args.output} (credentials not included).", file=sys.stderr)
+    else:
+        sys.stdout.write(text)
+
+
+def cmd_import(args):
+    if shutil.which("systemctl"):
+        active = subprocess.run(["systemctl", "is-active", "--quiet", "pbs-manager"]).returncode == 0
+        if active and not args.force:
+            sys.exit("The pbs-manager service is running and would overwrite the import. Use the web UI "
+                     "(Account, Export and import), or stop the service first: sudo systemctl stop pbs-manager")
+    with open(args.file) as f:
+        data = json.load(f)
+    cfg = Config(CONFIG_PATH)
+    try:
+        result, summary = build_import(cfg.snapshot(), data)
+    except ApiError as exc:
+        sys.exit(f"Can't import: {exc.message}")
+    print(f"Destinations: {summary['targets']}, jobs: {summary['jobs']}")
+    for label, key in (("Need a token secret", "needs_secret"), ("Need a key file password", "needs_keyfile_password"),
+                       ("Destinations removed", "removed_targets"), ("Jobs removed", "removed_jobs")):
+        if summary[key]:
+            print(f"{label}: {', '.join(summary[key])}")
+    if not args.yes and input("Replace the current destinations, jobs and email settings? [y/N] ").strip().lower() != "y":
+        sys.exit("Nothing changed.")
+    with cfg.lock:
+        cfg.data.update(targets=result["targets"], jobs=result["jobs"],
+                        email=result["email"], settings=result["settings"])
+        cfg.save()
+    print("Imported. Start the service and enter any missing credentials in the web UI.")
+
+
 def main():
     parser = argparse.ArgumentParser(prog="pbs-manager", description="PBS Backup Manager")
     sub = parser.add_subparsers(dest="cmd")
@@ -1744,6 +2215,14 @@ def main():
     p.set_defaults(func=cmd_configure)
     p = sub.add_parser("totp-reset", help="Turn off two-step verification if you've lost your device")
     p.set_defaults(func=cmd_totp_reset)
+    p = sub.add_parser("export", help="Export settings without credentials")
+    p.add_argument("-o", "--output", help="File to write (default: standard output)")
+    p.set_defaults(func=cmd_export)
+    p = sub.add_parser("import", help="Import settings exported from another machine")
+    p.add_argument("file")
+    p.add_argument("-y", "--yes", action="store_true", help="Don't ask for confirmation")
+    p.add_argument("--force", action="store_true", help="Import even if the service is running")
+    p.set_defaults(func=cmd_import)
     args = parser.parse_args()
     if not getattr(args, "func", None):
         parser.print_help()

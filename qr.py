@@ -139,7 +139,10 @@ class _Matrix:
         for _ in range(10):
             rem = (rem << 1) ^ ((rem >> 9) * 0x537)
         bits = (data << 10 | rem) ^ 0x5412
-        bit = lambda i: (bits >> i) & 1 == 1
+
+        def bit(i):
+            return (bits >> i) & 1 == 1
+
         s = self.size
         for i in range(6):
             self.set_fn(8, i, bit(i))
