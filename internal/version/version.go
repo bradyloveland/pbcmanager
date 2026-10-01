@@ -1,0 +1,21 @@
+// Package version holds the application version, read from the VERSION file
+// next to this source so releases can check the tag against one place.
+package version
+
+import (
+	_ "embed"
+	"strings"
+)
+
+//go:embed VERSION
+var raw string
+
+// Version is the running version, for example "2.0.0" or "2.1.0-dev".
+var Version = strings.TrimSpace(raw)
+
+const (
+	// Name is the full product name.
+	Name = "Proxmox Backup Client Web Manager"
+	// ShortName is used where space is tight: the sidebar, authenticator apps.
+	ShortName = "PBC Web Manager"
+)

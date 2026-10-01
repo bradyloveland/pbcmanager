@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v2.*"]
 
 permissions:
   contents: write
@@ -12,31 +12,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-go@v5
         with:
-          python-version: "3.12"
-
-      - name: Run tests
-        run: python -m unittest discover -s tests -t .
-
-      - name: Check the tag matches the app version
+          go-version-file: go.mod
+      - name: Tests
+        run: go test ./...
+      - name: Check the tag matches internal/version/VERSION
         run: |
-          version=$(python3 scripts/release_tools.py version)
+          version=$(cat internal/version/VERSION)
           if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} doesn't match VERSION ${version} in app.py"
+            echo "::error::Tag ${GITHUB_REF_NAME} doesn't match VERSION ${version}"
             exit 1
           fi
-
-      - name: Build the package
-        run: python3 scripts/release_tools.py package "${GITHUB_REF_NAME#v}" dist
-
-      - name: Write release notes from CHANGELOG.md
-        run: python3 scripts/release_tools.py notes "${GITHUB_REF_NAME#v}" > notes.md
-
-      - name: Publish the release
+      - name: Build release archives
+        run: make dist
+      - name: Release notes from CHANGELOG.md
+        run: scripts/release-notes.sh "${GITHUB_REF_NAME#v}" > notes.md
+      - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" dist/*.tar.gz dist/*.sha256 \
-            --title "PBS Backup Manager ${GITHUB_REF_NAME}" --notes-file notes.md
+          flags=()
+          case "${GITHUB_REF_NAME}" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "${GITHUB_REF_NAME}" dist/*.tar.gz dist/SHA256SUMS \
+            --title "Proxmox Backup Client Web Manager ${GITHUB_REF_NAME}" --notes-file notes.md "${flags[@]}"

@@ -1,6 +1,6 @@
 # Proxmox Backup Client Web Manager 2: design
 
-Status: **draft for review**. Nothing here is built yet.
+Status: **in progress**. Milestone 1 is built; see the progress table in the README.
 
 Version 2 is a rewrite in Go of PBS Backup Manager 1.x, under a new name: **Proxmox Backup Client Web Manager**. It manages file-level backups on many Linux machines (clients) from one central server, sending each client's backups to one or more Proxmox Backup Server (PBS) destinations.
 
@@ -244,11 +244,11 @@ Every setting that was CLI-only or config-file-only in 1.x is on a **Settings** 
 **Network changes.** A wrong port, address or certificate can lock you out, so these work like a monitor resolution change:
 1. The server starts listening with the new settings.
 2. The UI sends you to the new address with a confirmation prompt.
-3. If you don't confirm within 60 seconds, the server goes back to the old settings.
+3. If you don't confirm within about two minutes, the server goes back to the old settings.
 
 **What still needs a terminal:**
 - The first install: one command in the LXC.
-- Recovery commands for when you're locked out of the web UI: `pbcwm passwd` and `pbcwm totp-reset`.
+- Recovery commands for when you're locked out of the web UI: `pbcwm passwd`, `pbcwm totp-reset`, and `pbcwm network --reset` (every interface, port 8099, self-signed HTTPS).
 - `pbcwm-runner uninstall` on a client whose server is gone.
 
 ## Install

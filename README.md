@@ -1,64 +1,61 @@
-# PBS Backup Manager
+# Proxmox Backup Client Web Manager
 
-A small, self-hosted web UI for file-level backups to [Proxmox Backup Server](https://www.proxmox.com/en/proxmox-backup-server) with `proxmox-backup-client`. It's built for NAS boxes like OpenMediaVault, but runs on any Linux machine with Python 3.8+ and systemd.
+A self-hosted web UI for file-level backups with `proxmox-backup-client`. One central server manages backups on many Linux machines over SSH, each sending its data straight to one or more Proxmox Backup Server destinations.
 
-![Dashboard](docs/images/dashboard.png)
+> **Version 2 is in development** on this branch (`v2`). It's a rewrite in Go and isn't ready for use yet. The working single-machine version, 1.2.0, is on [`main`](https://github.com/bradyloveland/proxmoxbackupclientwebmanager/tree/main) and in [Releases](https://github.com/bradyloveland/proxmoxbackupclientwebmanager/releases/tag/v1.2.0).
 
-## Features
+## How version 2 works
 
-- **Destinations.** Store PBS servers, datastores and API tokens, with a connection test that shows datastore usage.
-- **Backup jobs.** Choose folders with a built-in folder browser, set exclusions, an upload speed limit, change-detection mode and optional client-side encryption.
-- **Schedules.** Run by hand, on chosen days at a set time, or every few hours. Jobs queue and run one at a time by default.
-- **Dashboard.** See each job's last 20 runs at a glance, how much of your data is in a backup, and how much space each destination has left.
-- **Live logs and alerts.** Watch a backup as it runs, cancel it, and get an email when one fails, with the reason and the end of the log.
-- **Secure sign-in.** Username and password, optional two-step verification with any authenticator app, recovery codes and brute-force protection.
-- **Reverse-proxy ready.** Trusted `X-Forwarded-*` handling, sub-path hosting and a health endpoint.
-- **Export and import.** Move your settings to another machine or keep a copy; credentials are never included.
-- **No dependencies.** Python standard library only. Nothing to `pip install`.
+- **Clients never depend on the server.** Each client keeps its own schedule and credentials under systemd and backs up straight to PBS. If the server is down, backups still run, and the server catches up on results when it's back.
+- **Set up over SSH.** The server connects to a client as root once, installs `proxmox-backup-client` if it's missing, and creates a limited `pbcwm` account for everything after that.
+- **Many clients and destinations.** A job can back up to more than one PBS destination.
+- **Everything in the browser.** Setup, every setting and updates happen in the web UI. Only the first install, and the recovery commands for when you're locked out, need a terminal.
 
-## Quick start
+The full plan is in [docs/design-v2.md](docs/design-v2.md).
 
-Download the latest package from [Releases](https://github.com/bradyloveland/pbswebclient/releases), or clone the repository:
+## Progress
+
+| Milestone | State |
+| --- | --- |
+| M1: server base: sign-in with two-step verification, setup in the browser, Settings page (including network and HTTPS with confirm-or-undo), installer, CI | **Done** |
+| M2: clients over SSH | Next |
+| M3: backups | |
+| M4: dashboard | |
+| M5: updates from the browser | |
+| M6: moving from 1.x, docs, 2.0.0 release | |
+
+## Trying the development version
+
+The server runs on Debian 12 or 13 (an LXC container works well) on x86-64 or ARM64. Build a package and install it:
 
 ```bash
-git clone https://github.com/bradyloveland/pbswebclient.git
-cd pbswebclient
+make dist                      # on a machine with Go 1.26+
+scp dist/pbcwm-*-linux-amd64.tar.gz root@your-lxc:
+```
+
+On the server:
+
+```bash
+tar xzf pbcwm-*-linux-amd64.tar.gz && cd pbcwm-*-linux-amd64
 sudo ./install.sh
 ```
 
-Open `https://<machine-ip>:8099`, sign in as `admin` with the password you chose, then:
+The installer prints the address and a one-time **setup code**. Open the address and enter the code to create the admin account. Run `sudo ./install.sh --help` for options such as `--behind-proxy`. Everything they set can also be changed later under Settings.
 
-1. **Destinations → Add a destination.** Enter your PBS host, datastore, user, API token and fingerprint. See [Preparing Proxmox Backup Server](docs/pbs-setup.md) for creating the token and its permissions.
-2. **Backup jobs → Create a backup job.** Pick folders and a schedule.
-3. **Email alerts.** Add your SMTP details and send a test email.
-4. **Account.** Turn on two-step verification.
-
-To run it behind Nginx, Caddy, Nginx Proxy Manager or Traefik, install with `--behind-proxy` or `--proxy-ip`. See [Reverse proxy](docs/reverse-proxy.md).
-
-## Documentation
-
-| Guide | What's in it |
-| --- | --- |
-| [Installation](docs/installation.md) | Requirements, installer options, upgrading, uninstalling, file locations |
-| [Preparing Proxmox Backup Server](docs/pbs-setup.md) | Creating the user, API token and permissions |
-| [Using the app](docs/usage.md) | Destinations, jobs, schedules, exclusions, seeding large folders, the dashboard, export and import |
-| [Reverse proxy](docs/reverse-proxy.md) | Example configurations and how forwarded headers are trusted |
-| [Security](docs/security.md) | How credentials, sessions and two-step verification work |
-| [Troubleshooting](docs/troubleshooting.md) | Common errors and how to fix them |
-| [HTTP API](docs/api.md) | Endpoint reference |
-| [Development](docs/development.md) | Architecture, running the tests, contributing |
-
-## Command line
+If you're locked out:
 
 ```bash
-sudo pbs-manager passwd            # reset the admin password
-sudo pbs-manager totp-reset        # turn off two-step verification
-sudo pbs-manager configure --help  # port, bind address, TLS, proxies, base path, concurrency
-sudo pbs-manager export -o settings.json
-sudo pbs-manager import settings.json   # with the service stopped
-journalctl -u pbs-manager -f       # service log
+sudo pbcwm passwd            # set a new password
+sudo pbcwm totp-reset        # turn off two-step verification
+sudo pbcwm network --reset   # every interface, port 8099, self-signed HTTPS
 ```
+
+## Development
+
+See [docs/development.md](docs/development.md).
 
 ## License
 
-[MIT](LICENSE)
+MIT. See [LICENSE](LICENSE).
+
+This project isn't affiliated with or endorsed by Proxmox Server Solutions GmbH. Proxmox is their registered trademark.
