@@ -72,9 +72,9 @@ type Host struct {
 	// refusePbcm makes sshd turn the pbcm account away, as OpenMediaVault's
 	// "AllowGroups root _ssh" does for an account outside those groups.
 	refusePbcm bool
-	active   map[string]chan struct{}
-	runs     sync.WaitGroup
-	client   string
+	active     map[string]chan struct{}
+	runs       sync.WaitGroup
+	client     string
 }
 
 // NewSigner returns a fresh ed25519 key.
