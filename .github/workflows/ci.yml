@@ -71,7 +71,8 @@ jobs:
               usermod -aG sudo "$SETUP_USER"
             fi
             if [ -n "$SSH_GROUP" ]; then
-              groupadd "$SSH_GROUP"
+              # The openssh-server package already creates _ssh on Debian.
+              getent group "$SSH_GROUP" >/dev/null || groupadd "$SSH_GROUP"
               echo "AllowGroups root $SSH_GROUP" >> /etc/ssh/sshd_config
             fi
             exec /usr/sbin/sshd -D -e'
