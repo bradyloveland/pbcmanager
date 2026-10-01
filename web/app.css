@@ -84,6 +84,7 @@ h3{font-size:15px;font-weight:620;margin:0 0 4px}
 .banner{border-radius:var(--r-sm);padding:12px 16px;margin-bottom:20px;border:1px solid}
 .banner.bad{background:var(--bad-soft);border-color:color-mix(in srgb,var(--bad) 35%,transparent)}
 .banner.warn{background:var(--warn-soft);border-color:color-mix(in srgb,var(--warn) 35%,transparent)}
+.banner.ok{background:var(--ok-soft);border-color:color-mix(in srgb,var(--ok) 35%,transparent)}
 .banner.info{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 35%,transparent)}
 .banner code,.banner .mono{font-family:var(--mono);font-size:13px}
 .banner .btnrow{margin-top:10px}
@@ -131,6 +132,7 @@ legend + *{clear:both}
 .result.ok{background:var(--ok-soft);color:var(--ok)}
 .result.bad{background:var(--bad-soft);color:var(--bad)}
 .result.info{background:var(--surface-2)}
+.result.warn{background:var(--warn-soft);color:var(--warn)}
 .subform{margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}
 
 /* Key/value lists */
@@ -234,6 +236,7 @@ details.adv[open] > summary{margin-bottom:16px}
 .destname{font-size:14px}
 .spaceline{display:flex;justify-content:space-between;gap:10px;margin-top:4px}
 .warn-text{color:var(--warn)}
+.notes{white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.5;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px 14px;max-height:340px;overflow:auto}
 .mt-8{margin-top:8px}
 .pill.idle{background:var(--surface-2);color:var(--muted)}
 

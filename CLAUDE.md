@@ -13,7 +13,7 @@ The plan is in `docs/design-v2.md`, and progress by milestone is in `README.md`.
 
 ## Hard rules
 
-- **No terminal needed after install.** Every setting must be visible and changeable in the web UI. The only CLI-only things are the first install and the lock-out recovery commands (`pbcm passwd`, `pbcm totp-reset`, `pbcm network --reset`).
+- **No terminal needed after install.** Every setting must be visible and changeable in the web UI. The only CLI-only things are the first install and the lock-out recovery commands (`pbcm passwd`, `pbcm totp-reset`, `pbcm network --reset`, and `pbcm rollback` for an update that left the UI unreachable).
 - **Settings changes must keep working for existing installs.** Schema changes are new numbered files in `internal/store/migrations/`, never edits to old ones. The installer upgrades in place and must not reset settings.
 - **Credentials are write-only.**
   - Secrets are encrypted at rest (`internal/secret`) and never returned by the API or included in exports.

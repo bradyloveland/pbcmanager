@@ -304,6 +304,9 @@ type Status struct {
 	Applied string       `json:"applied"` // hash of the bundle it has
 	Now     int64        `json:"now"`
 	Sizes   []FolderSize `json:"sizes"`
+	// Runner is the SHA-256 of the client's pbcm-runner, RunnerVersion its version.
+	Runner        string `json:"runner"`
+	RunnerVersion string `json:"runner_version"`
 }
 
 // LogChunk is part of a run's log.

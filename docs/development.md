@@ -3,7 +3,7 @@
 ## Layout
 
 ```
-cmd/pbcm/          The server program and its commands (serve, setup-code, passwd, totp-reset, network)
+cmd/pbcm/          The server program and its commands (serve, setup-code, passwd, totp-reset, network, rollback)
 cmd/pbcm-runner/   The program installed on clients (always linux/amd64)
 internal/backups/   Destination and job checks, building each client's bundle, the server's own PBS calls
 internal/bundle/    What the server sends clients and what they report back (shared by pbcm and pbcm-runner)
@@ -16,6 +16,8 @@ internal/alerts/    Email alerts: SMTP settings and sending, deciding what to al
 internal/auth/      Password hashing, TOTP, recovery codes, sign-in throttling
 internal/config/    Every setting: definitions, defaults, checks. Network settings.
 internal/qr/        QR codes for authenticator enrolment (standard library only)
+internal/release/   Release signing: the signed MANIFEST, checking archives, comparing versions, the trusted keys
+internal/update/    Updating the server from the web UI: GitHub check, staging, swapping files, rollback
 internal/secret/    Encryption for secrets stored in the database
 internal/server/    HTTP server, API, listeners, network change confirm/undo
 internal/store/     SQLite database and its migrations
@@ -24,7 +26,8 @@ internal/version/   VERSION file, product name
 web/                The browser UI (embedded in the program)
 install.sh          Installer and upgrader for the server
 uninstall.sh
-scripts/            Release helpers
+scripts/            Release helpers and CI's update test
+tools/pbcm-sign/    Writes and signs a release folder's MANIFEST (used by make dist)
 docs/               Documentation, including the version 2 design
 ```
 
@@ -115,4 +118,14 @@ Version 2 releases are tagged `v2.X.Y`. Bug fixes are patch releases (2.0.1) and
    ```
 3. `.github/workflows/release.yml` runs the tests, checks the tag matches `VERSION`, builds the archives with `SHA256SUMS`, and publishes the release with that version's changelog section. Versions with a `-` (like `2.0.0-rc.1`) are marked as pre-releases.
 
-Releases will be signed once self-update lands (milestone 5).
+### Signing
+
+Every release archive holds a `MANIFEST` with the SHA-256 of each file, and `MANIFEST.sig`, an ed25519 signature of it. The server checks it before installing an update (downloaded or uploaded), and each client's `pbcm-runner` checks it before replacing itself. The public keys are in `internal/release/keys.go`.
+
+- **The private key** is the `PBCM_SIGNING_KEY` repository secret (Settings → Secrets and variables → Actions), in the form `pbcm-2026:<base64 seed>`. `release.yml` refuses to publish without it. Keep an offline copy, such as in a password manager: if it's lost, existing servers can't verify new releases and need install.sh once.
+- **Signing locally:** `PBCM_SIGNING_KEY=... make dist`. Without the variable, `make dist` builds unsigned archives. They install with install.sh but are refused by the web UI.
+- **Replacing the key:** generate a new pair with `go run ./tools/pbcm-sign genkey <id>`, then add the public key to `keys.go` next to the old one. Release one version still signed with the old key, so servers learn the new one. Then switch the secret and, later, remove the old key.
+
+### Testing updates
+
+The CI `update` job (`scripts/ci-update-test.sh`) runs on a real systemd machine. It builds three versions that trust a throwaway key, installs the first with install.sh, then uploads and installs the second. Next it rolls back by hand and updates again. Finally it installs a third build made not to start, and checks that the previous version is put back automatically.

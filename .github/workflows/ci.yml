@@ -231,3 +231,21 @@ jobs:
       - name: Service log
         if: failure()
         run: sudo journalctl -u pbcm --no-pager -n 100
+
+  update:
+    # Updates from the web UI on a real systemd machine: install, update,
+    # roll back by hand, and roll back automatically from a build that
+    # doesn't start. Uses a throwaway signing key made by the test.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Update and roll back
+        run: scripts/ci-update-test.sh
+      - name: Service log
+        if: failure()
+        run: |
+          sudo journalctl -u pbcm --no-pager -n 150
+          sudo cat /var/lib/pbcm/update.json || true

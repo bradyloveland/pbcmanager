@@ -72,6 +72,15 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/sizes/check", priv(s.apiSizesCheck))
 	m.HandleFunc("POST /api/clients/{id}/measure", priv(s.apiClientMeasure))
 
+	m.HandleFunc("GET /api/update", priv(s.apiUpdate))
+	m.HandleFunc("POST /api/update/check", priv(s.apiUpdateCheck))
+	m.HandleFunc("POST /api/update/download", priv(s.apiUpdateDownload))
+	m.HandleFunc("POST /api/update/upload", s.apiLimit(true, maxUpload, s.apiUpdateUpload))
+	m.HandleFunc("POST /api/update/discard", priv(s.apiUpdateDiscard))
+	m.HandleFunc("POST /api/update/install", priv(s.apiUpdateInstall))
+	m.HandleFunc("POST /api/update/rollback", priv(s.apiUpdateRollback))
+	m.HandleFunc("POST /api/update/dismiss", priv(s.apiUpdateDismiss))
+
 	m.HandleFunc("GET /api/alerts", priv(s.apiAlertList))
 	m.HandleFunc("GET /api/alerts/settings", priv(s.apiAlertSettings))
 	m.HandleFunc("PUT /api/alerts/settings", priv(s.apiAlertSettingsUpdate))

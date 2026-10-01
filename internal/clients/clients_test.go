@@ -3,6 +3,8 @@ package clients
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"github.com/bradyloveland/pbcmanager/internal/backups"
 	"github.com/bradyloveland/pbcmanager/internal/bundle"
 	"github.com/bradyloveland/pbcmanager/internal/clients/clienttest"
+	"github.com/bradyloveland/pbcmanager/internal/release"
 	"github.com/bradyloveland/pbcmanager/internal/runner"
 	"github.com/bradyloveland/pbcmanager/internal/secret"
 	"github.com/bradyloveland/pbcmanager/internal/sshx"
@@ -497,5 +500,64 @@ func TestFolderSizesAreMeasuredAndCollected(t *testing.T) {
 	js := sum.Jobs[j.ID]
 	if js.FolderComplete || len(js.FolderErrors) != 1 || !strings.Contains(js.FolderErrors[0], "not found") {
 		t.Fatalf("missing folder: %+v", js)
+	}
+}
+
+func TestRunnerIsUpdatedFromASignedRelease(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	saved := release.Keys
+	release.Keys = []release.Key{{ID: "test", Pub: pub}}
+	t.Cleanup(func() { release.Keys = saved })
+
+	h := newHarness(t)
+	ctx := context.Background()
+	c, v := h.add(t, Login{User: "root", Password: rootPW})
+	if !v.OK {
+		t.Fatalf("setup: %+v", v)
+	}
+	if s := h.m.RunnerState(c.ID); s != RunnerCurrent {
+		t.Fatalf("right after setup the runner matches: %s", s)
+	}
+	onClient := func() string { b, _ := os.ReadFile(h.host.Path(runner.Path)); return string(b) }
+	serverHas := func(b string) {
+		os.WriteFile(h.m.runnerPath, []byte(b), 0o755)
+		h.m.runnerCache = nil
+		delete(h.m.measureAsked, "runner:"+c.ID)
+	}
+
+	// The server gets a new runner but isn't a signed release: nothing is sent.
+	serverHas("RUNNER-BINARY-2")
+	h.m.SyncClient(ctx, c.ID)
+	if s := h.m.RunnerState(c.ID); s != RunnerRepair || onClient() != "RUNNER-BINARY" {
+		t.Fatalf("unsigned server runner: %s, client has %q", s, onClient())
+	}
+	// Repair installs it, and that shows at once rather than at the next check-in.
+	task, err := h.m.Repair(c.ID, Login{User: "root", Password: rootPW}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := wait(t, task); !v.OK {
+		t.Fatalf("repair: %+v", v)
+	}
+	if s := h.m.RunnerState(c.ID); s != RunnerCurrent || onClient() != "RUNNER-BINARY-2" {
+		t.Fatalf("right after Repair: %s, client has %q", s, onClient())
+	}
+
+	// A signed release is sent at the next check-in.
+	serverHas("RUNNER-BINARY-3")
+	man := (&release.Manifest{Version: "2.1.0", Arch: "amd64", Files: map[string]string{"pbcm-runner": release.Hash([]byte("RUNNER-BINARY-3"))}}).Encode()
+	dir := filepath.Dir(h.m.runnerPath)
+	os.WriteFile(filepath.Join(dir, "MANIFEST"), man, 0o644)
+	os.WriteFile(filepath.Join(dir, "MANIFEST.sig"), release.Sign("test", priv, man), 0o644)
+	h.m.runnerCache = nil
+	h.m.SyncClient(ctx, c.ID)
+	if onClient() != "RUNNER-BINARY-3" {
+		t.Fatalf("the signed runner should be on the client: %q", onClient())
+	}
+	if s := h.m.RunnerState(c.ID); s != RunnerCurrent {
+		t.Fatalf("after the update: %s", s)
+	}
+	if c, _ = h.st.GetClient(c.ID); c.RunnerVersion != "2.1.0" {
+		t.Fatalf("runner version: %q", c.RunnerVersion)
 	}
 }

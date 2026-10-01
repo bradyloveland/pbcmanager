@@ -327,7 +327,10 @@ func (h *Host) exec(user, cmd string, stdin []byte) (string, string, int) {
 		if h.failWith != "" {
 			return "==> Setting up Debian\nERROR: " + h.failWith + "\n", "", 1
 		}
-		// What setup.sh does for the account: add the key with the forced command.
+		// What setup.sh does: install pbcm-runner, and add the key with the
+		// forced command for the account.
+		os.MkdirAll(filepath.Dir(h.Path(runner.Path)), 0o755)
+		os.WriteFile(h.Path(runner.Path), h.files[TmpDir+"/pbcm-runner"], 0o755)
 		line := "restrict," + runner.KeyMarker + " " + strings.TrimSpace(string(h.files[TmpDir+"/key.pub"])) + "\n"
 		os.MkdirAll(filepath.Dir(h.authorizedKeysPath()), 0o700)
 		if err := os.WriteFile(h.authorizedKeysPath(), []byte(line), 0o600); err != nil {

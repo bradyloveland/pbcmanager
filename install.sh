@@ -110,6 +110,19 @@ mv -f "$APP_DIR/pbcm.new" "$APP_DIR/pbcm"
 # The copy sent to clients during setup (always x86-64, like proxmox-backup-client).
 install -o "$USER_NAME" -g "$USER_NAME" -m 755 "$RUNNER_BIN" "$APP_DIR/pbcm-runner.new"
 mv -f "$APP_DIR/pbcm-runner.new" "$APP_DIR/pbcm-runner"
+# The signed manifest lets the server send pbcm-runner updates to clients; the
+# scripts are kept so they can be run again later.
+REL_DIR="$(dirname "$BIN")"
+for f in MANIFEST MANIFEST.sig install.sh uninstall.sh; do
+  if [[ "$REL_DIR" -ef "$APP_DIR" ]]; then
+    continue # run from the kept copy in the program folder
+  elif [[ -f "$REL_DIR/$f" ]]; then
+    install -o "$USER_NAME" -g "$USER_NAME" -m 644 "$REL_DIR/$f" "$APP_DIR/$f"
+  else
+    rm -f "$APP_DIR/$f"
+  fi
+done
+chmod 755 "$APP_DIR/install.sh" "$APP_DIR/uninstall.sh" 2>/dev/null || true
 
 cat > /usr/local/bin/pbcm <<EOF
 #!/bin/sh
@@ -172,6 +185,10 @@ User=$USER_NAME
 Group=$USER_NAME
 Environment=HOME=$DATA_DIR
 ExecStart=$APP_DIR/pbcm serve
+# After an update from the web UI, the previous version (pbcm.prev) counts
+# crashes of the new one and puts itself back after three. Otherwise it does
+# nothing; the "-" ignores it being missing.
+ExecStopPost=-$APP_DIR/pbcm.prev rollback --after-failure
 Restart=always
 RestartSec=5
 UMask=0077
@@ -193,6 +210,7 @@ LockPersonality=yes
 [Install]
 WantedBy=multi-user.target
 EOF
+rm -f /etc/systemd/system/pbcm-rollback.service
 systemctl daemon-reload
 systemctl enable pbcm >/dev/null 2>&1
 

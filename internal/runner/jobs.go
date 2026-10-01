@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/bradyloveland/pbcmanager/internal/bundle"
+	"github.com/bradyloveland/pbcmanager/internal/version"
 )
 
 // Locations for jobs on a client.
@@ -620,7 +621,8 @@ func StatusSince(env *Env, since int64) error {
 	if err != nil {
 		return err
 	}
-	out := bundle.Status{Runs: []bundle.Run{}, Applied: st.Hash, Now: env.now().Unix(), Sizes: env.sizes()}
+	out := bundle.Status{Runs: []bundle.Run{}, Applied: st.Hash, Now: env.now().Unix(), Sizes: env.sizes(),
+		Runner: env.selfHash(), RunnerVersion: version.Version}
 	active := map[string]bool{}
 	for _, id := range env.runIDs() {
 		r, err := env.loadRun(id)

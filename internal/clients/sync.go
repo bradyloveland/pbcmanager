@@ -295,6 +295,9 @@ func (m *Manager) SyncClient(ctx context.Context, clientID string) ([]*store.Run
 		c.RunCursor = st.Now
 	}
 	c.AppliedHash, c.LastContact = st.Applied, time.Now().Unix()
+	if st.RunnerVersion != "" {
+		c.RunnerVersion = st.RunnerVersion
+	}
 	if c.Status == store.ClientUnreachable {
 		c.Status, c.StatusDetail = store.ClientReady, ""
 	}
@@ -308,6 +311,9 @@ func (m *Manager) SyncClient(ctx context.Context, clientID string) ([]*store.Run
 		}
 	}
 	m.syncSizes(ctx, c, st.Sizes)
+	if c.Status == store.ClientReady {
+		m.syncRunner(ctx, c, &st)
+	}
 	if m.Sync.OnFinished != nil {
 		for _, r := range finished {
 			m.Sync.OnFinished(c, r)

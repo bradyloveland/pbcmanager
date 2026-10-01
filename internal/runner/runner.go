@@ -131,6 +131,8 @@ func Dispatch(env *Env, args []string) error {
 		return Uninstall(env, keep)
 	case "apply":
 		return Apply(env, env.Stdin)
+	case "self-update":
+		return SelfUpdate(env, env.Stdin)
 	case "measure":
 		if err := measureUsage(args); err != nil {
 			return err
@@ -236,7 +238,9 @@ type Info struct {
 	SystemdVersion string `json:"systemd_version"`
 	ClientVersion  string `json:"client_version"`
 	RunnerVersion  string `json:"runner_version"`
-	ServerHere     bool   `json:"server_here"`
+	// RunnerHash is the SHA-256 of the installed pbcm-runner.
+	RunnerHash string `json:"runner_hash"`
+	ServerHere bool   `json:"server_here"`
 	// Applied is the hash of the settings bundle this client has.
 	Applied string `json:"applied"`
 	// Timezone is the client's IANA time zone, like Europe/Berlin; its
@@ -266,7 +270,7 @@ func ParseOSRelease(r io.Reader) map[string]string {
 
 // Detect gathers facts about the client.
 func Detect(env *Env) Info {
-	info := Info{RunnerVersion: version.Version}
+	info := Info{RunnerVersion: version.Version, RunnerHash: env.selfHash()}
 	if f, err := os.Open(env.path("/etc/os-release")); err == nil {
 		rel := ParseOSRelease(f)
 		f.Close()

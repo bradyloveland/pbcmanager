@@ -47,6 +47,10 @@ type Manager struct {
 	// measureAsked is when the server last asked for each folder ("client:path").
 	measureAsked map[string]time.Time
 	measuring    map[string]bool
+	// pbcm-runner on each client (by hash) and this server's copy.
+	runnerHashes   map[string]string
+	runnerUpdating map[string]bool
+	runnerCache    *serverRunner
 
 	// Sync configures keeping clients in step (see sync.go).
 	Sync SyncConfig
@@ -427,6 +431,9 @@ func (m *Manager) refresh(ctx context.Context, c *store.Client) error {
 	c.OSID, c.OSPretty, c.OSCodename, c.Arch = info.OSID, info.OSPretty, info.OSCodename, info.Arch
 	c.Hostname, c.SystemdVersion, c.ClientVersion, c.RunnerVersion = info.Hostname, info.SystemdVersion, info.ClientVersion, info.RunnerVersion
 	c.ServerHere, c.LastContact, c.Timezone = info.ServerHere, time.Now().Unix(), info.Timezone
+	if info.RunnerHash != "" {
+		m.noteRunner(c.ID, info.RunnerHash) // so a Repair shows up straight away
+	}
 	c.Status, c.StatusDetail, c.OfferedKey = store.ClientReady, "", ""
 	m.backOnline(c)
 	if info.ClientVersion == "" {

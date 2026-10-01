@@ -53,6 +53,16 @@ Version 2: a rewrite in Go, renamed PBC Manager. Work in progress; see docs/desi
   - **Destination nearly full** email alert, at a percentage you choose (90% by default), and another email when there's room again.
   - **New settings** for how often space, backup sizes and folder sizes are checked.
 
+- **Updates from the web UI** (milestone 5) on a new Updates page:
+  - **Check for updates** on GitHub, daily (with a notice on the Dashboard) and when you press Check now. Release notes are shown before you install.
+  - **Download and install** in one click, or **upload a release file** for a server without internet access.
+  - **Signed releases:** only files signed by the project are accepted. Each file's checksum is checked, and anything unexpected in the archive is refused.
+  - **Safe installs:** the database is backed up first and the previous version is kept. If the new version stops with an error three times before it's settled in, the previous version and database are put back automatically, and the Updates page says why.
+  - **Go back** to the previous version by hand.
+  - **Automatic updates** (off by default) install new versions during an hour you choose. A version that was rolled back isn't tried again automatically.
+  - **Client runners:** after the server updates, each client gets the matching `pbcm-runner`, and checks its signature before replacing itself. The Updates page shows each client's version.
+- `pbcm rollback` puts back the previous version from a terminal, when the service is stopped.
+
 ### Fixed
 - Removing a client deleted its `pbcm` account up to a minute later than intended, because systemd timers fire late by default. It's now removed within a few seconds.
 - **New setting, "Web address of this server",** so alert emails link to the run.

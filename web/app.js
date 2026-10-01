@@ -12,7 +12,8 @@ let session = null, routeToken = 0, pendingTimer = null;
 
 async function api(method, path, body) {
   const opts = {method, headers: {"X-PBCM": "1"}, credentials: "same-origin"};
-  if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
+  if (body instanceof Blob) { opts.headers["Content-Type"] = "application/octet-stream"; opts.body = body; }
+  else if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
   let res;
   try { res = await fetch("api" + path, opts); }
   catch (_) { throw new Error("Can't reach the server. Check that it's running and your network connection."); }
@@ -182,6 +183,7 @@ const routes = [
   [/^#\/alerts$/, "alerts", viewAlerts],
   [/^#\/activity\/(\w+)\/([\w-]+)$/, "activity", viewRun],
   [/^#\/settings$/, "settings", viewSettings],
+  [/^#\/updates$/, "updates", viewUpdates],
   [/^#\/account$/, "account", viewAccount],
   [/^#\/confirm-network\/([\w-]+)$/, "settings", viewConfirmNetwork],
 ];
@@ -245,7 +247,8 @@ async function viewDashboard(token) {
   if (token !== routeToken) return;
   // Only nudge about two-step verification while it's off.
   const twoStep = acct.totp_enabled ? "" : `<div class="banner warn"><b>Two-step verification is off.</b> Anyone with your password can manage every client's backups. <a href="#/account">Turn it on</a></div>`;
-  const alertCfg = await api("GET", "/alerts/settings");
+  const [alertCfg, upd] = await Promise.all([api("GET", "/alerts/settings"), api("GET", "/update").catch(() => null)]);
+  const updateNote = updateBanner(upd);
   const noAlerts = alertCfg.settings.enabled ? "" : `<div class="banner warn">Email alerts are off, so a failed or missed backup won't notify anyone. <a href="#/alerts">Set up alerts</a></div>`;
   if (!clients.length) {
     render(`<div class="health"><span class="dot"></span><h1>No clients yet</h1></div>${twoStep}
@@ -264,7 +267,7 @@ async function viewDashboard(token) {
     let cls = trouble.length || failing.length ? "bad" : "ok", title = head;
     if (failing.length) title = failing.length === 1 ? `${failing[0].name} on ${failing[0].client_name} failed its last run` : `${failing.length} jobs failed their last run`;
     else if (!trouble.length && jobs.length) title = jobs.length === 1 ? "Your backup job is healthy" : `All ${jobs.length} backup jobs are healthy`;
-    render(`<div class="health ${cls}"><span class="dot"></span><h1>${esc(title)}</h1></div>${twoStep}${jobs.length ? noAlerts : ""}
+    render(`<div class="health ${cls}"><span class="dot"></span><h1>${esc(title)}</h1></div>${updateNote}${twoStep}${jobs.length ? noAlerts : ""}
       ${jobs.length ? sizeTiles(sizes, destinations, jobs, clients) + jobLedger(jobs, sizes) : `<div class="panel empty"><h2>No backup jobs yet</h2><p>Your clients are ready. Add a destination for your Proxmox Backup Server, then create a job to choose folders and a schedule.</p><div class="btnrow"><a class="btn primary" href="#/jobs/new">Create a backup job</a><a class="btn" href="#/destinations/new">Add a destination</a></div></div>`}
       <h2 class="mt-16">Clients</h2>${clientsTable(clients)}`);
     bindRowLinks();
@@ -1140,6 +1143,135 @@ async function viewAlerts(token) {
   });
 }
 
+/* ---------- updates ---------- */
+// updateBanner tells the Dashboard about a new version or a rolled-back update.
+function updateBanner(u) {
+  if (!u) return "";
+  const l = u.last;
+  if (l && l.phase === "rolled_back" && !l.seen && !l.manual)
+    return `<div class="banner bad"><b>The update to ${esc(l.from)} was undone.</b> ${esc(l.reason)} Version ${esc(l.to)} is running. <a href="#/updates">Details</a></div>`;
+  if (u.newer && u.check.latest)
+    return `<div class="banner info">Version ${esc(u.check.latest.version)} is available. <a href="#/updates">See what's new</a></div>`;
+  return "";
+}
+
+// notesHtml shows release notes (Markdown from the changelog) as plain text,
+// with headings bold and list markers as bullets.
+function notesHtml(text) {
+  if (!text) return `<p class="muted">No release notes.</p>`;
+  const lines = esc(text).split("\n").map(l => /^#{1,6}\s/.test(l) ? `<b>${l.replace(/^#+\s*/, "")}</b>` : l.replace(/^(\s*)[-*] /, "$1• "));
+  return `<div class="notes">${lines.join("\n")}</div>`;
+}
+
+// waitForRestart follows the server through a restart, then reloads.
+function waitForRestart(box, target) {
+  const started = Date.now();
+  let down = false;
+  const tick = async () => {
+    let v = null;
+    try { const r = await fetch("api/health", {cache: "no-store"}); if (r.ok) v = (await r.json()).version; } catch (_) {}
+    if (v === null) down = true;
+    if (v && (v === target || down)) { location.hash = "#/updates"; location.reload(); return; }
+    if (Date.now() - started > 180000) {
+      box.innerHTML = `<div class="result bad">The server hasn't come back after 3 minutes. Check it with: journalctl -u pbcm -n 50</div>`;
+      return;
+    }
+    setTimeout(tick, 2000);
+  };
+  setTimeout(tick, 1500);
+}
+
+async function viewUpdates(token) {
+  const u = await api("GET", "/update");
+  if (token !== routeToken) return;
+  const c = u.check || {}, l = u.last;
+  let lastHtml = "";
+  if (l && !l.seen) {
+    if (l.phase === "rolled_back") lastHtml = `<div class="banner ${l.manual ? "warn" : "bad"}"><b>${l.manual ? `Went back to version ${esc(l.to)}.` : `The update to ${esc(l.from)} was undone.`}</b> ${esc(l.reason)}
+      <div class="btnrow"><button class="btn small" id="u-dismiss">OK</button></div></div>`;
+    else if (l.phase === "done") lastHtml = `<div class="banner ok">Updated from ${esc(l.from)} to ${esc(l.to)}. <button class="btn small" id="u-dismiss">OK</button></div>`;
+    else if (l.phase === "installed" || l.phase === "confirming") lastHtml = `<div class="banner info">Version ${esc(l.to)} was just installed and is being checked. If it doesn't stay up, version ${esc(l.from)} is put back automatically.</div>`;
+  }
+  const latest = c.latest;
+  let checkHtml;
+  if (c.error) checkHtml = `<div class="result bad">${esc(c.error)}</div>`;
+  else if (!c.checked) checkHtml = `<p class="muted">Not checked yet.</p>`;
+  else if (u.newer) checkHtml = `<h3>Version ${esc(latest.version)} is available</h3>
+    <p class="sub">Released ${esc(fmtDate(latest.published))}${latest.page ? ` · <a href="${esc(latest.page)}" target="_blank" rel="noopener noreferrer">On GitHub</a>` : ""}</p>
+    ${notesHtml(latest.notes)}
+    <div class="btnrow mt-12"><button class="btn primary" id="u-download" ${u.cant_update ? "disabled" : ""}>Download and install ${esc(latest.version)}</button></div>`;
+  else checkHtml = `<p>This is the newest version.</p>`;
+  const staged = u.staged;
+  const stagedHtml = staged ? `<div class="panel"><h2>Ready to install: version ${esc(staged.version)}</h2>
+      <p class="hint">Checked: signed by the PBC Manager project, every file intact.</p>${notesHtml(staged.notes)}
+      <div class="btnrow mt-12"><button class="btn primary" id="u-install" ${u.cant_update ? "disabled" : ""}>Install ${esc(staged.version)}</button><button class="btn" id="u-discard">Remove</button></div></div>` : "";
+  const runnerRows = u.clients.length ? `<div class="tablewrap"><table><thead><tr><th>Client</th><th>pbcm-runner</th><th>Status</th></tr></thead><tbody>
+      ${u.clients.map(x => `<tr><td><a href="#/clients/${esc(x.id)}">${esc(x.name)}</a></td><td class="mono small">${esc(x.runner_version || "—")}</td>
+        <td><span class="pill ${{current: "ok", updating: "busy", outdated: "warn", repair: "warn"}[x.runner_state] || "idle"}">${esc(x.runner_label)}</span></td></tr>`).join("")}
+    </tbody></table></div>
+    ${u.clients.some(x => x.runner_state === "repair") ? `<p class="hint">${u.signed ? "These clients have a pbcm-runner too old to update itself. Use Repair on each one once." : "This server isn't a signed release (a development build), so it can't send pbcm-runner to clients. Use Repair on a client to update it."}</p>` : ""}` : `<p class="muted">No clients yet.</p>`;
+  render(`<h1>Updates</h1><p class="lede">New versions install in place and keep every setting. The server restarts for a few seconds; backups on clients carry on meanwhile.</p>
+    ${lastHtml}
+    ${u.cant_update ? `<div class="banner warn">${esc(u.cant_update)}</div>` : ""}
+    <div class="panel"><div class="pagehead m-0"><div><h2>Version ${esc(u.version)}</h2>
+      <p class="sub">${c.checked ? `Checked ${esc(ago(c.checked))}` : "Never checked"}. <a href="#/settings">Daily checks and automatic updates</a> are in Settings.</p></div>
+      <button class="btn" id="u-check">Check now</button></div>
+      <div id="u-check-result" class="mt-12">${checkHtml}</div><div id="u-progress"></div></div>
+    ${stagedHtml}
+    <div class="panel"><h2>Install from a file</h2>
+      <p class="hint">For a server without internet access: download <span class="mono">pbcm-&lt;version&gt;-linux-${esc(u.arch || "amd64")}.tar.gz</span> from the project's GitHub releases page and choose it here. Only files signed by the project are accepted.</p>
+      <div class="btnrow"><input type="file" id="u-file" accept=".tar.gz,.tgz,application/gzip"><button class="btn" id="u-upload" disabled>Upload and check</button></div>
+      <div id="u-upload-result" class="mt-12"></div></div>
+    ${u.rollback_to ? `<div class="panel"><h2>Go back to version ${esc(u.rollback_to)}</h2>
+      <p class="hint">Puts back the previous version and the database as it was just before the update. Changes made since then (jobs, settings, run history collected by the server) are lost; clients keep their own run history.</p>
+      <button class="btn danger" id="u-rollback">Go back to ${esc(u.rollback_to)}</button></div>` : ""}
+    <div class="panel"><h2>Clients</h2><p class="hint m-0 mb-14">After the server updates, it sends the matching pbcm-runner to each client the next time it checks in. Each client checks the signature before replacing anything.</p>${runnerRows}</div>`);
+
+  const progress = $("#u-progress");
+  const install = async () => {
+    progress.innerHTML = `<div class="result info mt-12">Installing. The server restarts in a moment…</div>`;
+    try { const r = await api("POST", "/update/install"); waitForRestart(progress, r.version); }
+    catch (ex) { progress.innerHTML = `<div class="result bad mt-12">${esc(ex.message)}</div>`; }
+  };
+  $("#u-check").onclick = async e => {
+    e.target.disabled = true;
+    try { await api("POST", "/update/check"); route(); }
+    catch (ex) { $("#u-check-result").innerHTML = `<div class="result bad">${esc(ex.message)}</div>`; e.target.disabled = false; }
+  };
+  const dl = $("#u-download");
+  if (dl) dl.onclick = async () => {
+    if (!confirm(`Install version ${latest.version}? The server restarts for a few seconds.`)) return;
+    dl.disabled = true;
+    progress.innerHTML = `<div class="result info mt-12">Downloading and checking version ${esc(latest.version)}…</div>`;
+    try { await api("POST", "/update/download", {version: latest.version}); await install(); }
+    catch (ex) { progress.innerHTML = `<div class="result bad mt-12">${esc(ex.message)}</div>`; dl.disabled = false; }
+  };
+  const inst = $("#u-install");
+  if (inst) inst.onclick = () => { if (confirm(`Install version ${staged.version}? The server restarts for a few seconds.`)) { inst.disabled = true; install(); } };
+  const disc = $("#u-discard");
+  if (disc) disc.onclick = async () => { await api("POST", "/update/discard"); route(); };
+  const dis = $("#u-dismiss");
+  if (dis) dis.onclick = async () => { await api("POST", "/update/dismiss"); route(); };
+  const file = $("#u-file"), up = $("#u-upload"), out = $("#u-upload-result");
+  file.onchange = () => { up.disabled = !file.files.length; };
+  up.onclick = async () => {
+    up.disabled = true; out.innerHTML = `<div class="result info">Uploading and checking ${esc(file.files[0].name)}…</div>`;
+    try {
+      const r = await api("POST", "/update/upload", file.files[0]);
+      if (!r.newer) { out.innerHTML = `<div class="result warn">That's version ${esc(r.staged.version)}, which isn't newer than the running ${esc(u.version)}, so it can't be installed.</div>`; await api("POST", "/update/discard"); return; }
+      route();
+    } catch (ex) { out.innerHTML = `<div class="result bad">${esc(ex.message)}</div>`; up.disabled = false; }
+  };
+  const rb = $("#u-rollback");
+  if (rb) rb.onclick = async () => {
+    if (!confirm(`Go back to version ${u.rollback_to}? Changes made since the update are lost.`)) return;
+    rb.disabled = true;
+    const box = rb.parentElement;
+    try { const r = await api("POST", "/update/rollback"); box.insertAdjacentHTML("beforeend", `<div class="result info mt-12">Going back. The server restarts in a moment…</div>`); waitForRestart(box, r.version); }
+    catch (ex) { toast(ex.message, "bad"); rb.disabled = false; }
+  };
+}
+
 /* ---------- folder picker ---------- */
 function pickFolder(clientId, start, choosing) {
   const dlg = $("#picker");
@@ -1197,7 +1329,7 @@ async function viewSettings(token) {
     <div class="panel"><h2>About</h2><dl class="kv">
       <dt>Version</dt><dd>${esc(session.version)}</dd>
       <dt>Project</dt><dd><a href="https://github.com/bradyloveland/pbcmanager" rel="noopener noreferrer" target="_blank">github.com/bradyloveland/pbcmanager</a></dd>
-      <dt>Updates</dt><dd class="muted">Updating from this page arrives in a later development milestone.</dd>
+      <dt>Updates</dt><dd><a href="#/updates">Check for updates</a></dd>
     </dl></div>`);
 
   $("#copy-key").onclick = async () => {
