@@ -222,6 +222,7 @@ type Summary struct {
 	Destinations   map[string]Space     `json:"destinations"`
 	FolderTotal    *int64               `json:"folder_total"`
 	FolderPending  int                  `json:"folder_pending"`
+	FolderFailed   int                  `json:"folder_failed"` // couldn't be measured (missing, unreadable)
 	FolderMeasured int64                `json:"folder_measured"`
 	BackupTotal    *int64               `json:"backup_total"`
 	Measuring      bool                 `json:"measuring"`
@@ -320,6 +321,8 @@ func Summarise(st *store.Store) (*Summary, error) {
 				if out.FolderMeasured == 0 || f.Measured < out.FolderMeasured {
 					out.FolderMeasured = f.Measured
 				}
+			} else if ok && f.Error != "" && !f.Measuring {
+				out.FolderFailed++
 			} else {
 				out.FolderPending++
 			}

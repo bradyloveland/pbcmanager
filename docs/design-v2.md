@@ -115,6 +115,7 @@ The UI suggests turning off root password login over SSH once a client is added.
 | `/etc/systemd/system/pbcm-job@.service` | One template unit used by every job |
 | `/etc/systemd/system/pbcm-job-<job>.timer` | One timer per scheduled job |
 | `/var/lib/pbcm/client/runs/` | One folder per run with its result and log. Kept for 90 days or the last 500 runs. Both limits can be changed in Settings. |
+| `/var/lib/pbcm/client/sizes/` | The latest size measurement of each backed-up folder |
 
 `pbcm-runner` commands (the server calls these through `sudo`):
 
@@ -125,7 +126,8 @@ The UI suggests turning off root password login over SSH once a client is added.
 | `start <job>` / `cancel <job>` | `systemctl start` / stop with SIGINT, then SIGKILL after 20 s |
 | `status --since <cursor>` | Results finished since the server's last check, plus anything running now |
 | `log <run> --offset <n>` | Log text from an offset, for the live log view |
-| `browse <path>`, `du <path>` | Folder picker and folder sizes (`du` at idle priority, with a fallback, as in 1.x) |
+| `browse <path>` | Folder picker |
+| `measure <path>...` | Starts measuring each folder in the background, as a transient systemd unit at idle CPU and disk priority (`du -sxb`, or walking the tree if `du` can't). Results are reported with `status`. A slow folder never holds up the server's SSH connection. |
 | `detect`, `install-client` | OS detection and installing `proxmox-backup-client` |
 | `self-update` | Replaces itself with a new signed version read from its input |
 | `uninstall` | Removes timers, units, files, the sudo rule and the `pbcm` user. With `--keep-history` it keeps `/var/lib/pbcm`. |
@@ -180,6 +182,7 @@ Clients must hold their PBS credentials, because they back up without the server
 | `runs` | Copied from clients: run id, job, destination, status, times, exit code, summary, trigger, email error, reported-late flag |
 | `run_logs` | Log text, or a file under the data folder for large logs |
 | `settings` | Key/value pairs for everything on the Settings page |
+| `sizes` | The latest destination space, newest backup size per job and destination, and folder sizes reported by clients |
 | `auth`, `sessions` | Admin account, TOTP, recovery codes. Sessions survive a restart, so an update doesn't sign you out. |
 
 Schema changes run as numbered migrations at startup.
@@ -192,8 +195,15 @@ Secrets in the database are encrypted with a key kept in a separate file (`/etc/
 - New alerts:
   - **missed backup**: a scheduled time passed with no run reported
   - **client unreachable** for longer than a set time
-  - **destination nearly full**: 80% / 90%, using the same thresholds as the dashboard (milestone 4, with datastore space tracking)
+  - **destination nearly full**: at a percentage you set (90% by default), and again once there's room (2% below it, so hovering at the limit doesn't send email each check)
 - If the server was down, the alert says the result is reported late and when the backup actually ran.
+
+### Sizes and space
+
+- **Folder sizes** are measured on clients, every 12 hours by default and right after a job's folders change, or when you press Measure again. Each folder is counted once in the Data protected total, even if several jobs back it up or it's inside another backed-up folder. A folder that's missing (an unplugged disk, say) is reported, not counted as empty.
+- **Destination space** is checked by the server every 15 minutes, and right after a destination is saved. The dashboard bar turns amber from 80% used and red from 90%.
+- **Backup sizes** are the newest snapshot of each job on each destination, checked hourly and right after each successful backup. They're PBS's size before deduplication.
+- All three intervals are on the Settings page.
 
 ## Self-update
 
@@ -322,7 +332,7 @@ Everything in 1.2.0, now per client:
 | **M1: base** | Go project, SQLite and migrations, auth (password, TOTP, recovery codes, throttling), setup in the browser, Settings page, embedded UI shell, CI, installer |
 | **M2: clients** | SSH key, adding a client as root, host key pinning, OS detection, installing `proxmox-backup-client`, `pbcm` account and sudo rule, `pbcm-runner` install, folder browser, Repair and Remove client |
 | **M3: backups** | Destinations and per-client overrides, jobs with several destinations, `apply`, timers, `run`/`start`/`cancel`, credentials on clients, status catch-up, live logs, snapshots, email alerts including missed and unreachable |
-| **M4: dashboard** | Results across clients, size widgets, Activity page, banners |
+| **M4: dashboard** | Folder sizes measured on clients, newest backup sizes, destination space, Data protected and Destination space widgets, nearly-full alerts |
 | **M5: updates** | Signed releases, update check, upload, swap, health check, rollback, runner updates |
 | **M6: moving from 1.x and release** | 1.x import, docs, LXC recipe, testing on your machines → **2.0.0** |
 

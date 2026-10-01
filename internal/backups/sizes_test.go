@@ -108,7 +108,7 @@ func TestSummaryCountsNestedAndSharedFoldersOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	// /srv/media is inside /srv and in both jobs: it's counted once, in /srv.
-	if *sum.FolderTotal != 1000 || sum.FolderPending != 0 || sum.FolderMeasured != 100 {
+	if *sum.FolderTotal != 1000 || sum.FolderPending != 0 || sum.FolderFailed != 0 || sum.FolderMeasured != 100 {
 		t.Fatalf("total: %+v", sum)
 	}
 	if *sum.Jobs["j1"].FolderBytes != 1400 || *sum.Jobs["j2"].FolderBytes != 400 {

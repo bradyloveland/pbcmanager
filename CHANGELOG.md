@@ -44,6 +44,14 @@ Version 2: a rewrite in Go, renamed PBC Manager. Work in progress; see docs/desi
   - **Late reports:** alerts about a run the server only heard about late (it was down, or couldn't reach the client) say so.
   - **Each alert is sent once.** Recent alerts are listed with whether the email went out.
 - **Client time zones:** clients report theirs, so next-run times and missed-backup checks follow the client's clock.
+
+- **Sizes and space** (milestone 4):
+  - **Data protected** on the Dashboard: how much data your jobs' folders hold, counting each folder once, and the size of the newest backups.
+  - **Destination space** on the Dashboard and Destinations page, amber from 80% used and red from 90%.
+  - **Folder sizes** are measured on each client in the background at low priority, every 12 hours and whenever a job's folders change. Missing folders are reported instead of counted as empty. Measure again starts a new measurement.
+  - **Sizes per job:** each job shows its size, and its page shows the folders' size and the newest backup on each destination.
+  - **Destination nearly full** email alert, at a percentage you choose (90% by default), and another email when there's room again.
+  - **New settings** for how often space, backup sizes and folder sizes are checked.
 - **New setting, "Web address of this server",** so alert emails link to the run.
 
 ### Changed
