@@ -42,7 +42,8 @@ jobs:
         include:
           - {image: "debian:trixie", user: root}
           - {image: "debian:bookworm", user: root}
-          - {image: "debian:bullseye", user: root}
+          # Debian 11 is end-of-life; its packages live on archive.debian.org.
+          - {image: "debian:bullseye", user: root, archive: "yes"}
           - {image: "ubuntu:24.04", user: alice, extra: sudo, expect: "static build"}
     steps:
       - uses: actions/checkout@v4
@@ -54,10 +55,15 @@ jobs:
           IMAGE: ${{ matrix.image }}
           EXTRA: ${{ matrix.extra }}
           SETUP_USER: ${{ matrix.user }}
+          ARCHIVE: ${{ matrix.archive }}
         run: |
-          docker run -d --name client -p 127.0.0.1:2222:22 -e EXTRA -e SETUP_USER "$IMAGE" bash -c '
+          docker run -d --name client -p 127.0.0.1:2222:22 -e EXTRA -e SETUP_USER -e ARCHIVE "$IMAGE" bash -c '
             set -e
             export DEBIAN_FRONTEND=noninteractive
+            if [ -n "$ARCHIVE" ]; then
+              sed -i "s#deb.debian.org#archive.debian.org#g" /etc/apt/sources.list
+              echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99archive
+            fi
             apt-get update -q
             apt-get install -y -q --no-install-recommends openssh-server systemd $EXTRA
             mkdir -p /run/sshd

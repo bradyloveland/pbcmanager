@@ -35,7 +35,8 @@ apt_install() {
   command -v apt-get >/dev/null 2>&1 || fail "Can't install $* automatically because this isn't an apt-based system. Install it by hand, then use Repair."
   export DEBIAN_FRONTEND=noninteractive
   if [ "$APT_UPDATED" -eq 0 ]; then
-    apt-get update -q
+    apt-get update -q ||
+      fail "apt-get update failed, so nothing could be installed. Fix this machine's package sources (an end-of-life release like Debian 11 needs archive.debian.org), then use Repair."
     APT_UPDATED=1
   fi
   apt-get install -y -q --no-install-recommends "$@"
