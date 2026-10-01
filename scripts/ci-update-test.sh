@@ -74,7 +74,7 @@ say "Installing C, which doesn't start"
 upload_install builds/c/pbcm-2.0.0-ci.3-linux-amd64.tar.gz 2.0.0-ci.3
 wait_for "B to be put back" 120 phase_is rolled_back
 wait_for "B to run" 60 is_version 2.0.0-ci.2
-has "didn't start, on purpose" "$base/update" || fail "the rollback should say why"
+has "didn't start: this test build doesn't start, on purpose" "$base/update" || fail "the rollback should say why"
 systemctl is-active --quiet pbcm || fail "the service should be running"
 
 say "Unsigned releases are refused"
