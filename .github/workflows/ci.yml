@@ -125,11 +125,16 @@ jobs:
             docker run -d --name $c --hostname $c --network pbcm-e2e --privileged --cgroupns=host \
               -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock pbcm-$c
           done
+          # PBS creates its keys when its services first start; wait for both.
           for i in $(seq 1 90); do
-            docker exec pbs proxmox-backup-manager datastore list >/dev/null 2>&1 && break
+            if docker exec pbs systemctl is-active --quiet proxmox-backup proxmox-backup-proxy &&
+               docker exec pbs test -f /etc/proxmox-backup/authkey.key; then
+              echo "PBS is up"; break
+            fi
             sleep 2
           done
-          docker exec pbs proxmox-backup-manager datastore list
+          docker exec pbs systemctl --no-pager status proxmox-backup proxmox-backup-proxy | head -20 || true
+          docker exec pbs test -f /etc/proxmox-backup/authkey.key
       - name: Set up PBS (datastore, user, token, permissions)
         run: |
           docker exec pbs mkdir -p /datastore
