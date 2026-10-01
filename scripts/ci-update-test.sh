@@ -32,23 +32,26 @@ sudo builds/a/pbcm-2.0.0-ci.1-linux-amd64/install.sh --skip-client --no-tls >/de
 base=http://127.0.0.1:8099/api
 jar="$(mktemp)"
 api() { curl -fsS -b "$jar" -c "$jar" -H 'X-PBCM: 1' "$@"; }
+# has TEXT ARGS...: the API reply contains TEXT. The whole reply is read
+# first; piping curl into grep -q fails under pipefail when grep stops early.
+has() { local text="$1" out; shift; out="$(api "$@")" || return 1; grep -qF -- "$text" <<<"$out"; }
 code="$(sudo pbcm setup-code)"
 api -H 'Content-Type: application/json' "$base/setup" \
   -d "{\"code\":\"$code\",\"username\":\"admin\",\"password\":\"ci-password-123\"}" >/dev/null
 
-running() { curl -fsS "$base/health" 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4; }
+running() { local out; out="$(curl -fsS "$base/health" 2>/dev/null)" || return 0; grep -o '"version":"[^"]*"' <<<"$out" | cut -d'"' -f4; }
 wait_for() { # description seconds command...
   local what="$1" secs="$2"; shift 2
   for _ in $(seq "$secs"); do "$@" && return 0; sleep 1; done
   fail "timed out waiting for $what"
 }
 is_version() { [[ "$(running)" == "$1" ]]; }
-phase_is() { api "$base/update" | grep -q "\"phase\":\"$1\""; }
+phase_is() { has "\"phase\":\"$1\"" "$base/update" 2>/dev/null; }
 
 upload_install() { # archive version
-  api -H 'Content-Type: application/octet-stream' --data-binary @"$1" "$base/update/upload" | grep -q "\"version\":\"$2\"" \
+  has "\"version\":\"$2\"" -H 'Content-Type: application/octet-stream' --data-binary @"$1" "$base/update/upload" \
     || fail "upload of $2 wasn't accepted"
-  api -X POST "$base/update/install" | grep -q '"restarting":true' || fail "install of $2 didn't start"
+  has '"restarting":true' -X POST "$base/update/install" || fail "install of $2 didn't start"
 }
 
 say "Updating to B"
@@ -58,7 +61,7 @@ wait_for "B to be confirmed" 60 phase_is "done"
 test "$(sudo /opt/pbcm/pbcm.prev version)" = 2.0.0-ci.1 || fail "A should be kept as pbcm.prev"
 
 say "Rolling back to A by hand"
-api -X POST "$base/update/rollback" | grep -q '"restarting":true' || fail "rollback didn't start"
+has '"restarting":true' -X POST "$base/update/rollback" || fail "rollback didn't start"
 wait_for "A to run again" 60 is_version 2.0.0-ci.1
 phase_is rolled_back || fail "the rollback should be recorded"
 
@@ -71,7 +74,7 @@ say "Installing C, which doesn't start"
 upload_install builds/c/pbcm-2.0.0-ci.3-linux-amd64.tar.gz 2.0.0-ci.3
 wait_for "B to be put back" 120 phase_is rolled_back
 wait_for "B to run" 60 is_version 2.0.0-ci.2
-api "$base/update" | grep -q "didn't start, on purpose" || fail "the rollback should say why"
+has "didn't start, on purpose" "$base/update" || fail "the rollback should say why"
 systemctl is-active --quiet pbcm || fail "the service should be running"
 
 say "Unsigned releases are refused"
