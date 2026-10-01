@@ -49,7 +49,8 @@ func clientView(c *store.Client) map[string]any {
 		"status_detail": c.StatusDetail, "os_id": c.OSID, "os_pretty": c.OSPretty, "os_codename": c.OSCodename,
 		"arch": c.Arch, "hostname": c.Hostname, "systemd_version": c.SystemdVersion, "client_version": c.ClientVersion,
 		"runner_version": c.RunnerVersion, "server_here": c.ServerHere, "last_contact": c.LastContact,
-		"created_at": c.CreatedAt, "host_key_fingerprint": "", "offered_fingerprint": "",
+		"created_at": c.CreatedAt, "host_key_fingerprint": "", "offered_fingerprint": "", "timezone": c.Timezone,
+		"unreachable_since": c.UnreachableSince,
 	}
 	if k, err := sshx.ParseKey(c.HostKey); err == nil {
 		v["host_key_fingerprint"] = sshx.Fingerprint(k)

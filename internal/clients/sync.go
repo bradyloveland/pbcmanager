@@ -32,6 +32,23 @@ type SyncConfig struct {
 	// OnFinished is called for every run that finished since the last check
 	// (alerts hook in here).
 	OnFinished func(c *store.Client, r *store.Run)
+	// OnReachable is called when a client that couldn't be reached answers
+	// again; since is when contact was lost.
+	OnReachable func(c *store.Client, since int64)
+}
+
+// backOnline clears a client's outage, telling the alerts hook. The caller
+// saves the client.
+func (m *Manager) backOnline(c *store.Client) {
+	if c.UnreachableSince == 0 {
+		return
+	}
+	since := c.UnreachableSince
+	c.UnreachableSince = 0
+	if m.Sync.OnReachable != nil {
+		snapshot := *c
+		go m.Sync.OnReachable(&snapshot, since)
+	}
 }
 
 func (m *Manager) syncLock(id string) *sync.Mutex {
@@ -233,8 +250,11 @@ func (m *Manager) SyncClient(ctx context.Context, clientID string) ([]*store.Run
 		if errors.As(err, &hk) {
 			c.Status, c.OfferedKey = store.ClientHostKeyChanged, sshx.FormatKey(hk.Offered)
 			c.StatusDetail = "The client's SSH host key has changed. If it was reinstalled, check the new key and use Repair; otherwise, investigate before trusting it."
-		} else if c.Status == store.ClientReady {
+		} else if c.Status == store.ClientReady || c.Status == store.ClientUnreachable {
 			c.Status, c.StatusDetail = store.ClientUnreachable, err.Error()
+			if c.UnreachableSince == 0 {
+				c.UnreachableSince = time.Now().Unix()
+			}
 		}
 		_ = m.store.SaveClient(c)
 		return nil, err
@@ -274,6 +294,7 @@ func (m *Manager) SyncClient(ctx context.Context, clientID string) ([]*store.Run
 	if c.Status == store.ClientUnreachable {
 		c.Status, c.StatusDetail = store.ClientReady, ""
 	}
+	m.backOnline(c)
 	if err := m.store.SaveClient(c); err != nil {
 		return nil, err
 	}

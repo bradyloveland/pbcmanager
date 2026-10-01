@@ -179,6 +179,7 @@ const routes = [
   [/^#\/destinations\/new$/, "destinations", t => viewDestinationForm(null, t)],
   [/^#\/destinations\/(\w+)$/, "destinations", viewDestinationForm],
   [/^#\/activity$/, "activity", viewActivity],
+  [/^#\/alerts$/, "alerts", viewAlerts],
   [/^#\/activity\/(\w+)\/([\w-]+)$/, "activity", viewRun],
   [/^#\/settings$/, "settings", viewSettings],
   [/^#\/account$/, "account", viewAccount],
@@ -244,6 +245,8 @@ async function viewDashboard(token) {
   if (token !== routeToken) return;
   // Only nudge about two-step verification while it's off.
   const twoStep = acct.totp_enabled ? "" : `<div class="banner warn"><b>Two-step verification is off.</b> Anyone with your password can manage every client's backups. <a href="#/account">Turn it on</a></div>`;
+  const alertCfg = await api("GET", "/alerts/settings");
+  const noAlerts = alertCfg.settings.enabled ? "" : `<div class="banner warn">Email alerts are off, so a failed or missed backup won't notify anyone. <a href="#/alerts">Set up alerts</a></div>`;
   if (!clients.length) {
     render(`<div class="health"><span class="dot"></span><h1>No clients yet</h1></div>${twoStep}
       <div class="panel empty"><h2>Add your first client</h2>
@@ -261,7 +264,7 @@ async function viewDashboard(token) {
     let cls = trouble.length || failing.length ? "bad" : "ok", title = head;
     if (failing.length) title = failing.length === 1 ? `${failing[0].name} on ${failing[0].client_name} failed its last run` : `${failing.length} jobs failed their last run`;
     else if (!trouble.length && jobs.length) title = jobs.length === 1 ? "Your backup job is healthy" : `All ${jobs.length} backup jobs are healthy`;
-    render(`<div class="health ${cls}"><span class="dot"></span><h1>${esc(title)}</h1></div>${twoStep}
+    render(`<div class="health ${cls}"><span class="dot"></span><h1>${esc(title)}</h1></div>${twoStep}${jobs.length ? noAlerts : ""}
       ${jobs.length ? jobLedger(jobs) : `<div class="panel empty"><h2>No backup jobs yet</h2><p>Your clients are ready. Add a destination for your Proxmox Backup Server, then create a job to choose folders and a schedule.</p><div class="btnrow"><a class="btn primary" href="#/jobs/new">Create a backup job</a><a class="btn" href="#/destinations/new">Add a destination</a></div></div>`}
       <h2 class="mt-16">Clients</h2>${clientsTable(clients)}`);
     bindRowLinks();
@@ -532,7 +535,8 @@ async function viewJobForm(id, token, presetClient) {
     $("#sched-hourly").classList.toggle("hidden", t !== "hourly");
     $("#sched-time").classList.toggle("hidden", t === "manual");
     $("#time-label").textContent = t === "hourly" ? "Starting at" : "Start time";
-    $("#time-hint").textContent = t === "hourly" ? "Runs at this minute past the hour, on hours that divide evenly by the interval." : "In the client's time zone.";
+    const tz = (clients.find(c => c.id === form.client_id.value) || {}).timezone;
+    $("#time-hint").textContent = t === "hourly" ? "Runs at this minute past the hour, on hours that divide evenly by the interval." : `In the client's time zone${tz ? " (" + tz + ")" : ""}.`;
     $("#sched-summary").textContent = t === "manual" ? "This job only runs when you press Run now." : "Summary: " + schedText(readSched());
   };
   form.addEventListener("change", syncSched);
@@ -888,6 +892,7 @@ async function viewClient(id, token) {
       <dt>Host name</dt><dd>${esc(c.hostname || "—")}</dd>
       <dt>System</dt><dd>${esc(c.os_pretty || "—")}${c.arch ? `, ${esc(c.arch)}` : ""}</dd>
       <dt>systemd</dt><dd>${esc(c.systemd_version || "—")}</dd>
+      <dt>Time zone</dt><dd>${esc(c.timezone || "Unknown (schedules shown in this server's time)")}</dd>
       <dt>Backup client</dt><dd>${c.client_version ? `proxmox-backup-client ${esc(c.client_version)}` : `<span class="muted">Not found</span>`}</dd>
       <dt>pbcm-runner</dt><dd>${esc(c.runner_version || "—")}</dd>
       <dt>Last contact</dt><dd>${esc(ago(c.last_contact))}</dd>
@@ -966,6 +971,77 @@ async function viewClient(id, token) {
       } catch (ex) { $("#x-err").innerHTML = `<div class="result bad">${esc(ex.message)}</div>`; btn.disabled = false; }
     });
   };
+}
+
+/* ---------- alerts ---------- */
+const ALERT_KIND = {failed: "Backup failed", succeeded: "Backup succeeded", missed: "Backup didn't run", unreachable: "Can't reach client", reachable: "Client back"};
+
+async function viewAlerts(token) {
+  const [{settings: a, password_set}, {alerts}] = await Promise.all([api("GET", "/alerts/settings"), api("GET", "/alerts?limit=50")]);
+  if (token !== routeToken) return;
+  const check = (name, label, hint) => `<label class="check"><input type="checkbox" name="${name}" ${a[name] ? "checked" : ""}><span><b>${label}</b>${hint ? `<br><span class="hint">${hint}</span>` : ""}</span></label>`;
+  render(`<h1>Alerts</h1><p class="lede">Get an email when something needs attention. Clients keep backing up whether or not the server can reach them; alerts tell you when they don't, or when a backup fails.</p>
+    ${a.enabled ? "" : `<div class="banner warn">Email alerts are off, so a failed or missed backup won't notify anyone.</div>`}
+    <form id="aform" class="panel" novalidate>
+      <fieldset class="section"><legend>When to send</legend>
+        <div class="choice">
+          ${check("enabled", "Send email alerts")}
+          ${check("on_failure", "When a backup fails", "Including backups interrupted by a restart, with the reason and the end of the log.")}
+          ${check("on_missed", "When a scheduled backup doesn't run", "Checked once the server has heard from the client after the scheduled time.")}
+          ${check("on_unreachable", "When a client can't be reached", "And again when it's back.")}
+          ${check("on_success", "When a backup succeeds", "Usually more email than you want; failures and missed backups are the ones to watch.")}
+        </div>
+        <div class="formgrid top">
+          <div class="field"><label for="a-grace"><span>Call a backup missed after</span></label><div class="unit"><input type="number" id="a-grace" name="missed_grace_minutes" value="${esc(a.missed_grace_minutes)}" min="10" max="1440"><span class="muted small">minutes</span></div>
+            <small>How long past its scheduled time a backup may start before it counts as missed.</small></div>
+          <div class="field"><label for="a-unreach"><span>Report a client after</span></label><div class="unit"><input type="number" id="a-unreach" name="unreachable_minutes" value="${esc(a.unreachable_minutes)}" min="5" max="10080"><span class="muted small">minutes unreachable</span></div>
+            <small>Short network blips don't send email.</small></div>
+        </div>
+      </fieldset>
+      <fieldset class="section"><legend>Recipients</legend>
+        <div class="formgrid top">
+          <label class="field"><span>Send to</span><input type="text" name="to" value="${esc(a.to)}" placeholder="you@example.com"><small>Separate several addresses with commas.</small></label>
+          <label class="field"><span>Send from</span><input type="email" name="from" value="${esc(a.from)}" placeholder="pbc-manager@example.com"></label>
+        </div>
+      </fieldset>
+      <fieldset class="section"><legend>Mail server</legend>
+        <p class="hint">For Gmail use smtp.gmail.com, port 587, STARTTLS and an app password rather than your normal password.</p>
+        <div class="formgrid">
+          <label class="field"><span>SMTP server</span><input type="text" name="host" value="${esc(a.host)}" placeholder="smtp.example.com"></label>
+          <div class="formgrid">
+            <label class="field"><span>Port</span><input type="number" name="port" value="${esc(a.port)}" min="1" max="65535"></label>
+            <label class="field"><span>Security</span><select name="security">${[["starttls", "STARTTLS"], ["ssl", "SSL/TLS"], ["none", "None"]].map(([k, l]) => `<option value="${k}" ${a.security === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+          </div>
+          <label class="field"><span>Username</span><input type="text" name="username" value="${esc(a.username)}" autocomplete="off"><small>Leave blank if the server doesn't need a sign-in.</small></label>
+          <label class="field"><span>Password</span><input type="password" name="password" autocomplete="new-password" placeholder="${password_set ? "Saved. Leave blank to keep it" : ""}"><small>Stored encrypted, never shown again.</small></label>
+        </div>
+      </fieldset>
+      <div id="a-result"></div>
+      <div class="formfoot"><div class="btnrow"><button class="btn primary" type="submit">Save alert settings</button><button type="button" class="btn" id="a-test">Send a test email</button></div></div>
+    </form>
+    <div class="panel"><h2>Recent alerts</h2>
+      ${alerts.length ? `<div class="tablewrap"><table><thead><tr><th>When</th><th>Alert</th><th>Email</th></tr></thead><tbody>
+        ${alerts.map(x => `<tr><td class="small">${esc(fmtTime(x.created_at))}</td><td>${esc(x.subject.replace("[PBC Manager] ", ""))}<div class="sub">${esc(ALERT_KIND[x.kind] || x.kind)}</div></td>
+          <td class="small">${x.sent_at ? `<span class="pill ok">Sent</span>` : x.error ? `<span class="pill bad">Not sent</span><div class="sub bad-text">${esc(x.error)}</div>` : `<span class="pill busy">Sending</span>`}</td></tr>`).join("")}
+      </tbody></table></div>` : `<p class="muted">No alerts yet.</p>`}</div>`);
+  const f = $("#aform"), out = $("#a-result");
+  const read = () => ({enabled: f.enabled.checked, on_failure: f.on_failure.checked, on_success: f.on_success.checked, on_missed: f.on_missed.checked,
+    on_unreachable: f.on_unreachable.checked, missed_grace_minutes: Number(f.missed_grace_minutes.value) || 0, unreachable_minutes: Number(f.unreachable_minutes.value) || 0,
+    to: f.to.value, from: f.from.value, host: f.host.value, port: Number(f.port.value) || 0, security: f.security.value, username: f.username.value, password: f.password.value});
+  f.security.addEventListener("change", () => { if ([25, 465, 587].includes(+f.port.value)) f.port.value = {starttls: 587, ssl: 465, none: 25}[f.security.value]; });
+  f.addEventListener("submit", async e => {
+    e.preventDefault(); out.innerHTML = "";
+    const btn = $("button[type=submit]", f); btn.disabled = true;
+    try { await api("PUT", "/alerts/settings", read()); f.password.value = ""; toast("Alert settings saved."); route(); }
+    catch (ex) { out.innerHTML = `<div class="result bad">${esc(ex.message)}</div>`; }
+    finally { btn.disabled = false; }
+  });
+  $("#a-test").addEventListener("click", async e => {
+    e.target.disabled = true; out.innerHTML = `<div class="result info">Sending…</div>`;
+    try { await api("POST", "/alerts/test", read()); out.innerHTML = `<div class="result ok">Test email sent. Check the inbox (and spam folder). Remember to save your settings.</div>`; }
+    catch (ex) { out.innerHTML = `<div class="result bad">${esc(ex.message)}</div>`; }
+    finally { e.target.disabled = false; }
+  });
 }
 
 /* ---------- folder picker ---------- */

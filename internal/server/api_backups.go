@@ -148,10 +148,14 @@ func (s *Server) jobView(j *store.Job, clients map[string]*store.Client, dests m
 		"excludes": j.Excludes, "schedule": j.Schedule, "change_detection": j.ChangeDetection, "rate": j.Rate,
 		"keyfile": j.Keyfile, "keyfile_password_set": j.KeyfilePassword != "", "enabled": j.Enabled,
 		"destinations": j.Destinations, "destination_names": dnames, "next_run": nil, "client_name": "", "recent": []any{}}
+	loc := time.Local
 	if c, ok := clients[j.ClientID]; ok {
 		v["client_name"] = c.Name
+		loc = c.Location()
+		v["timezone"] = c.Timezone
 	}
-	if next := bundle.Next(j.Schedule, j.Enabled, time.Now()); !next.IsZero() {
+	// Schedules run in the client's time zone.
+	if next := bundle.Next(j.Schedule, j.Enabled, time.Now().In(loc)); !next.IsZero() {
 		v["next_run"] = next.Unix()
 	}
 	if runs, err := s.store.ListRuns(store.RunFilter{JobID: j.ID, Limit: 20}); err == nil {

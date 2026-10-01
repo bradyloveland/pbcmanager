@@ -1,6 +1,6 @@
 # PBC Manager 2: design
 
-Status: **in progress**. Milestones 1, 2 and 3a are built; see the progress table in the README.
+Status: **in progress**. Milestones 1, 2 and 3 are built; see the progress table in the README.
 
 Version 2 is a rewrite in Go of PBS Backup Manager 1.x, under a new name: **PBC Manager**. It manages file-level backups on many Linux machines (clients) from one central server, sending each client's backups to one or more Proxmox Backup Server (PBS) destinations.
 
@@ -192,7 +192,7 @@ Secrets in the database are encrypted with a key kept in a separate file (`/etc/
 - New alerts:
   - **missed backup**: a scheduled time passed with no run reported
   - **client unreachable** for longer than a set time
-  - **destination nearly full**: 80% / 90%, using the same thresholds as the dashboard
+  - **destination nearly full**: 80% / 90%, using the same thresholds as the dashboard (milestone 4, with datastore space tracking)
 - If the server was down, the alert says the result is reported late and when the backup actually ran.
 
 ## Self-update

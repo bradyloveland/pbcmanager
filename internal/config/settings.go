@@ -7,6 +7,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"unicode"
 )
@@ -46,6 +47,9 @@ var Defs = []Def{
 	{Key: "general.server_name", Group: "general", Label: "Server name",
 		Help: "Shown in the sidebar, in authenticator apps and in alert emails. Leave blank to use this machine's hostname.",
 		Type: "string", MaxLen: 64, Default: ""},
+	{Key: "general.public_url", Group: "general", Label: "Web address of this server",
+		Help: "Used for links in alert emails, like https://backups.example.net/. Leave blank to leave links out.",
+		Type: "string", MaxLen: 200, Default: "", Placeholder: "https://backups.example.net/"},
 	{Key: "security.session_hours", Group: "security", Label: "Sign out after inactivity",
 		Help: "How long a signed-in browser stays signed in without being used.",
 		Type: "int", Unit: "hours", Min: 1, Max: 720, Default: 12},
@@ -113,6 +117,15 @@ func Clean(key string, raw json.RawMessage) (any, error) {
 		}
 		if strings.IndexFunc(s, unicode.IsControl) >= 0 {
 			return nil, invalid("%s can't contain control characters.", d.Label)
+		}
+		if key == "general.public_url" && s != "" {
+			u, err := url.Parse(s)
+			if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || strings.ContainsAny(s, " <>\"") {
+				return nil, invalid("Enter the address like https://backups.example.net/, or leave it blank.")
+			}
+			if !strings.HasSuffix(s, "/") {
+				s += "/"
+			}
 		}
 		return s, nil
 	}

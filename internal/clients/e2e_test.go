@@ -73,7 +73,7 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("setup failed: %s\n%s", v.Error, strings.Join(v.Lines, "\n"))
 	}
 	c, _ = st.GetClient(c.ID)
-	t.Logf("client ready: %s, proxmox-backup-client %s, systemd %s", c.OSPretty, c.ClientVersion, c.SystemdVersion)
+	t.Logf("client ready: %s, proxmox-backup-client %s, systemd %s, time zone %q", c.OSPretty, c.ClientVersion, c.SystemdVersion, c.Timezone)
 
 	d := &store.Destination{ID: "pbs", Name: "CI PBS", Host: os.Getenv("PBCM_E2E_PBS"), Port: 8007, Datastore: "store",
 		Username: "ci@pbs", TokenName: "ci", Secret: os.Getenv("PBCM_E2E_TOKEN_SECRET"), Fingerprint: os.Getenv("PBCM_E2E_FINGERPRINT")}

@@ -98,6 +98,7 @@ func NewAt(t TB, addr string) *Host {
 	if err := os.WriteFile(h.client, []byte(FakeClientScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	h.WriteFile("/etc/timezone", "America/Denver\n")
 	h.WriteFile("/etc/os-release", "PRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\nID=debian\nVERSION_ID=\"12\"\nVERSION_CODENAME=bookworm\n")
 	t.Cleanup(func() {
 		ln.Close()

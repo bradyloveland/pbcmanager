@@ -82,6 +82,7 @@ func TestDispatchRejectsUnknownAndNested(t *testing.T) {
 
 func TestDetect(t *testing.T) {
 	env, out, _ := testEnv(t)
+	write(t, env.path("/etc/timezone"), "America/Denver\n")
 	write(t, env.path("/etc/os-release"), `PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"
 NAME="Debian GNU/Linux"
 VERSION_ID="12"
@@ -96,7 +97,7 @@ ID=debian
 		t.Fatal(err)
 	}
 	want := Info{OSID: "debian", OSPretty: "Debian GNU/Linux 12 (bookworm)", OSCodename: "bookworm", OSVersion: "12",
-		Arch: "x86_64", SystemdVersion: "252", ClientVersion: "3.4.1"}
+		Arch: "x86_64", SystemdVersion: "252", ClientVersion: "3.4.1", Timezone: "America/Denver"}
 	info.Hostname, info.RunnerVersion = "", ""
 	if info != want {
 		t.Fatalf("got %+v", info)

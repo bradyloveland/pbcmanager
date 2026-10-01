@@ -229,6 +229,9 @@ type Info struct {
 	ServerHere     bool   `json:"server_here"`
 	// Applied is the hash of the settings bundle this client has.
 	Applied string `json:"applied"`
+	// Timezone is the client's IANA time zone, like Europe/Berlin; its
+	// schedules run in it.
+	Timezone string `json:"timezone"`
 }
 
 var (
@@ -279,7 +282,23 @@ func Detect(env *Env) Info {
 	if st, err := env.loadStored(); err == nil {
 		info.Applied = st.Hash
 	}
+	info.Timezone = timezone(env)
 	return info
+}
+
+// timezone reads the machine's time zone name, the way Debian stores it.
+func timezone(env *Env) string {
+	if raw, err := os.ReadFile(env.path("/etc/timezone")); err == nil {
+		if tz := strings.TrimSpace(string(raw)); tz != "" {
+			return tz
+		}
+	}
+	if target, err := os.Readlink(env.path("/etc/localtime")); err == nil {
+		if _, tz, ok := strings.Cut(target, "zoneinfo/"); ok {
+			return tz
+		}
+	}
+	return ""
 }
 
 // --------------------------------------------------------------- browse

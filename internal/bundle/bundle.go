@@ -248,6 +248,18 @@ func Next(s Schedule, enabled bool, t time.Time) time.Time {
 	return time.Time{}
 }
 
+// Prev returns the most recent scheduled start at or before t, or the zero
+// time for manual or disabled jobs.
+func Prev(s Schedule, enabled bool, t time.Time) time.Time {
+	var last time.Time
+	c := Next(s, enabled, t.AddDate(0, 0, -8))
+	for !c.IsZero() && !c.After(t) {
+		last = c
+		c = Next(s, enabled, c)
+	}
+	return last
+}
+
 // --------------------------------------------------------------------- runs
 
 // Run statuses.

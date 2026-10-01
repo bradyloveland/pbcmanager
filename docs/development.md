@@ -12,6 +12,7 @@ internal/clients/   Adding, checking, browsing, repairing and removing clients; 
 internal/clients/clienttest/  A fake client machine for tests: SSH server + the real pbcm-runner code
 internal/runner/    pbcm-runner's commands (detect, browse, uninstall) and its forced-command parser
 internal/sshx/      The server's SSH key, host key probing and pinning, running commands
+internal/alerts/    Email alerts: SMTP settings and sending, deciding what to alert about (failed, missed, unreachable)
 internal/auth/      Password hashing, TOTP, recovery codes, sign-in throttling
 internal/config/    Every setting: definitions, defaults, checks. Network settings.
 internal/qr/        QR codes for authenticator enrolment (standard library only)
@@ -82,11 +83,12 @@ Install the tools with `brew install go shellcheck` (or your package manager) an
 | `tlscert` | Self-signed certificates, mismatched or junk uploads |
 | `clients` | Over real SSH, against a fake Debian host run in the test. Covers: <ul><li>probing the host key</li><li>setup as root, as a sudo user (the password goes only to `sudo -S`), and with the server's key</li><li>refusing a host key that differs from the one checked</li><li>setup errors</li><li>duplicates</li><li>browse through the forced command</li><li>a changed host key blocking everything until repair</li><li>remove and uninstall</li></ul> |
 | `clients` (CI only) | `TestRealClient` sets up fresh Debian 13, 12 and Ubuntu 24.04 containers for real: installs `proxmox-backup-client` from Proxmox, then browses, repairs and uninstalls |
+| `alerts` | Settings checks (no header injection, no password over plain SMTP), sending through a local SMTP server. Covers: <ul><li>failure alerts with log tail, link and "reported late"</li><li>one alert per run</li><li>delivery errors recorded</li><li>missed backups, only judged after the client was heard from, in the client's time zone</li><li>outages and recovery</li></ul> |
 | `bundle` | Schedules to systemd `OnCalendar=` and "next run" agreeing, bundle checks and hashing, error summaries |
 | `backups` | Destination and job checks (secrets kept when left blank), bundle building, the PBS wrapper against a fake client |
 | `clients` (CI only, `e2e` job) | `TestEndToEnd`: a client container and a **real Proxmox Backup Server** container, both booting systemd. Covers: <ul><li>setup</li><li>timers and `systemd-creds`-encrypted credentials</li><li>a real backup and its snapshot listed from the server</li><li>a missing folder</li><li>cancelling a slow backup</li><li>uninstall, including removal of the account</li></ul> |
 | `runner` | Apply (secrets never in `bundle.json`, timers added and removed), runs to several destinations with the right environment, failures, cancel, interrupted runs, history pruning, the backup command line. Also command splitting (round-trips with the server's quoting, ignores shell syntax), detect, browse, uninstall removing only its own files and keeping the account when the server shares the machine |
-| `server` | The real server on local ports. Covers: <ul><li>setup code and throttling</li><li>sign-in, cookies, CSRF header</li><li>two-step sign-in with replay and recovery codes</li><li>sessions surviving a restart</li><li>settings</li><li>base path and trusted proxies</li><li>HTTPS and the HTTP redirect</li><li>network changes confirmed, undone, timed out, blocked by a busy port</li><li>switching to an uploaded certificate on the same port</li></ul> |
+| `server` | The real server on local ports. Covers: <ul><li>setup code and throttling</li><li>sign-in, cookies, CSRF header</li><li>two-step sign-in with replay and recovery codes</li><li>sessions surviving a restart</li><li>settings</li><li>base path and trusted proxies</li><li>HTTPS and the HTTP redirect</li><li>network changes confirmed, undone, timed out, blocked by a busy port</li><li>switching to an uploaded certificate on the same port</li><li>alert settings (write-only password, test email), and a failed backup on a client sending an alert</li></ul> |
 
 CI (`.github/workflows/ci.yml`) also installs the built package on an Ubuntu runner with systemd. It checks that the server answers over HTTPS and finishes setup through the API. Then it upgrades in place with a new port, and uninstalls with `--purge`.
 
