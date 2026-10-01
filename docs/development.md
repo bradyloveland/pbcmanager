@@ -77,7 +77,7 @@ Install the tools with `brew install go shellcheck` (or your package manager) an
 | `config` | Every setting's checks and defaults, network settings |
 | `tlscert` | Self-signed certificates, mismatched or junk uploads |
 | `clients` | Over real SSH, against a fake Debian host run in the test. Covers: <ul><li>probing the host key</li><li>setup as root, as a sudo user (the password goes only to `sudo -S`), and with the server's key</li><li>refusing a host key that differs from the one checked</li><li>setup errors</li><li>duplicates</li><li>browse through the forced command</li><li>a changed host key blocking everything until repair</li><li>remove and uninstall</li></ul> |
-| `clients` (CI only) | `TestRealClient` sets up fresh Debian 13, 12, 11 and Ubuntu 24.04 containers for real: installs `proxmox-backup-client` from Proxmox, then browses, repairs and uninstalls |
+| `clients` (CI only) | `TestRealClient` sets up fresh Debian 13, 12 and Ubuntu 24.04 containers for real: installs `proxmox-backup-client` from Proxmox, then browses, repairs and uninstalls |
 | `runner` | Command splitting (round-trips with the server's quoting, ignores shell syntax), detect, browse, uninstall removing only its own files and keeping the account when the server shares the machine |
 | `server` | The real server on local ports. Covers: <ul><li>setup code and throttling</li><li>sign-in, cookies, CSRF header</li><li>two-step sign-in with replay and recovery codes</li><li>sessions surviving a restart</li><li>settings</li><li>base path and trusted proxies</li><li>HTTPS and the HTTP redirect</li><li>network changes confirmed, undone, timed out, blocked by a busy port</li><li>switching to an uploaded certificate on the same port</li></ul> |
 

@@ -20,7 +20,8 @@ Version 2: a rewrite in Go, renamed PBC Manager. Work in progress; see docs/desi
 
 - **Clients** (milestone 2):
   - **Adding a client:** enter its address, check its SSH host key fingerprint, and sign in once as root or a sudo user. The password is used once and never saved.
-  - **Setup:** installs `proxmox-backup-client` from Proxmox if it's missing. Debian 13, 12 and 11 get the regular package; Debian 10, Ubuntu and other apt-based systems get the static build. The Proxmox signing keys are checked against built-in checksums.
+  - **Supported clients:** Debian 12 and 13, and systems based on them (Proxmox VE 8/9, OpenMediaVault 7/8, Ubuntu 22.04/24.04). Older releases are refused with a clear message.
+  - **Setup:** installs `proxmox-backup-client` from Proxmox if it's missing: the regular package on Debian, the static build on derivatives. The Proxmox signing keyring is checked against a built-in checksum.
   - **The `pbcm` account:** setup creates it so it signs in only with the server's key and can run nothing but `pbcm-runner`, through a forced command and a sudo rule checked with `visudo`.
   - **Host key pinning:** a client whose key changes is blocked until you compare the new key and repair it.
   - **Managing a client:** client details, Check now, a folder browser, Repair (runs setup again), and Remove (cleans everything up, or just takes the client off the list).

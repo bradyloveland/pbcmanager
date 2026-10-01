@@ -44,18 +44,17 @@ The project isn't affiliated with or endorsed by Proxmox Server Solutions GmbH. 
 
 ## Supported clients
 
-These match what `proxmox-backup-client` supports:
+Clients must be **Debian 12 (bookworm) or 13 (trixie), or a system based on them**, on x86-64 (the only platform `proxmox-backup-client` is made for), with systemd. End-of-life releases aren't supported.
 
-| Client | How the client software is installed |
+| Client | How `proxmox-backup-client` is installed |
 | --- | --- |
-| Debian 13 (trixie), 12 (bookworm) | Proxmox `pbs-client` apt repository, package `proxmox-backup-client` |
-| Debian 11 (bullseye) | Same repository, its own signing key, an older client version |
-| Debian 10 and other apt-based systems (Ubuntu, Mint…) | Proxmox's static build, `proxmox-backup-client-static`, from the Debian 12 repository (Proxmox's Debian 10 repository is now empty) |
-| Proxmox VE hosts, OMV | Already have it, or get the Debian package for their base |
-| Other x86-64 Linux (no apt) | Install the static client by hand, then use Repair. Automatic install may come later. |
-| Non-x86-64 (ARM etc.) | Not supported. The UI says so plainly. |
+| Debian 12 and 13, and systems that identify as Debian (Proxmox VE 8/9, OpenMediaVault 7/8) | Proxmox's `pbs-client` repository for that release, package `proxmox-backup-client` |
+| Other systems based on Debian 12 or 13 (for example Ubuntu 22.04 and 24.04) | The same repository, package `proxmox-backup-client-static`, which has no library dependencies to clash with |
+| Anything else (Debian 11 and older, non-Debian systems, ARM) | Refused before anything is installed, with a message saying what's supported |
 
-Clients also need systemd. Every supported Debian release has it.
+Setup reads the Debian base from `/etc/debian_version` (`12.x`, `13.x`, or `bookworm/sid` and `trixie/sid` on derivatives). If a client already has the software, the server records its version and leaves it alone.
+
+The Proxmox signing keyring (one keyring covers both releases) is downloaded over HTTPS and also checked against a SHA-256 checksum built into the server, so a tampered key is refused. The source goes in `/etc/apt/sources.list.d/pbcm-pbs-client.list` with `signed-by`.
 
 ## How it fits together
 
@@ -138,10 +137,10 @@ Every command checks its arguments and works only on `pbcm` files and units. Roo
 Clients must hold their PBS credentials, because they back up without the server. To keep that safe:
 
 - **Encrypted on disk:**
-  - On systemd 250+ (Debian 12 and 13), credentials are stored with `systemd-creds encrypt`. That ties them to the machine (and its TPM if it has one), so copying the file to another machine doesn't reveal them.
+  - On systemd 250+ (Debian 12 and 13, Ubuntu 24.04), credentials are stored with `systemd-creds encrypt`. That ties them to the machine (and its TPM if it has one), so copying the file to another machine doesn't reveal them.
   - The unit loads them with `LoadCredentialEncrypted=`.
-  - Older systemd (Debian 10/11) uses a root-only file loaded with `LoadCredential=`.
-- **Never on a command line or in an environment listing.** `pbcm-runner` points `proxmox-backup-client` at the credential file with `PBS_PASSWORD_FILE` and `PBS_ENCRYPTION_PASSWORD_FILE`, which Proxmox documents. Older client versions, such as the Debian 10 package, get checked during implementation.
+  - Older systemd (Ubuntu 22.04 has 249) uses a root-only file loaded with `LoadCredential=`.
+- **Never on a command line or in an environment listing.** `pbcm-runner` points `proxmox-backup-client` at the credential file with `PBS_PASSWORD_FILE` and `PBS_ENCRYPTION_PASSWORD_FILE`, which Proxmox documents.
 - **One PBS token per client is recommended.** The token has only the `DatastoreBackup` role, on that client's own **namespace**. A compromised client can then only add backups to its own namespace. It can't read or delete anyone else's backups. The destination form explains how to set this up in PBS.
   - A destination has default credentials and an optional namespace.
   - A client can override both for that destination.
