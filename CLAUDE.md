@@ -9,7 +9,7 @@ PBC Manager (`pbcm`), version 2: a Go rewrite of PBS Backup Manager 1.x.
 - Clients run their own schedules (systemd timers) and back up straight to Proxmox Backup Server. **Clients must never depend on the server:** if it's down, backups still run.
 - The owner's environment is Debian-based: OpenMediaVault, Debian, Proxmox hosts. Clients are reached on the LAN or over a VPN, never the public internet.
 
-The plan and milestones are in `docs/design-v2.md`; user documentation is in `docs/guide/`. 1.x (Python) lives on `main` until 2.0.0 ships; `v2` is the development branch.
+The plan and milestones are in `docs/design-v2.md`; user documentation is in `docs/guide/`. `main` is version 2. 1.x (Python) is kept on the `v1` branch (last release `v1.2.0`) in case it needs a fix.
 
 ## Hard rules
 
@@ -38,7 +38,7 @@ make dist     # linux amd64/arm64 release archives in dist/
 
 ## How to make changes
 
-1. Work on a branch and open a pull request against `v2`.
+1. Work on a branch and open a pull request against `main`.
 2. Add or update tests with every behaviour change. New endpoints get coverage in `internal/server/server_test.go`, which runs the real server.
 3. Keep `make check` green.
 4. Update the relevant page in `docs/` and add an entry under `## [Unreleased]` in `CHANGELOG.md`.

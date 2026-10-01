@@ -6,7 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-Version 2: a rewrite in Go, renamed PBC Manager. Work in progress; see docs/design-v2.md.
+## [2.0.0] - 2026-10-01
+
+Version 2: a rewrite in Go, renamed PBC Manager. One central server now manages backups on many clients over SSH; each client runs its own schedules and backs up straight to Proxmox Backup Server. To move from 1.x, see docs/guide/moving-from-1x.md.
 
 ### Added
 - One self-contained `pbcm` program for Linux x86-64 and ARM64, with the web UI built in and settings in an SQLite database.
@@ -18,7 +20,7 @@ Version 2: a rewrite in Go, renamed PBC Manager. Work in progress; see docs/desi
 - `pbcm network --reset` puts the network settings back to the defaults if the web UI can't be reached.
 - Installer for Debian 12/13, including LXC containers. It runs the service as an unprivileged `pbcm` user with systemd sandboxing, and falls back gracefully in containers without nesting.
 
-- **Clients** (milestone 2):
+- **Clients**:
   - **Adding a client:** enter its address, check its SSH host key fingerprint, and sign in once as root or a sudo user. The password is used once and never saved.
   - **Supported clients:** Debian 12 and 13, and systems based on them (Proxmox VE 8/9, OpenMediaVault 7/8, Ubuntu 22.04/24.04). Older releases are refused with a clear message.
   - **Setup:** installs `proxmox-backup-client` from Proxmox if it's missing: the regular package on Debian, the static build on derivatives. The Proxmox signing keyring is checked against a built-in checksum.
@@ -27,7 +29,7 @@ Version 2: a rewrite in Go, renamed PBC Manager. Work in progress; see docs/desi
   - **Managing a client:** client details, Check now, a folder browser, Repair (runs setup again), and Remove (cleans everything up, or just takes the client off the list).
   - **The server's SSH key** is shown under Settings.
 
-- **Backups** (milestone 3a):
+- **Backups**:
   - **Destinations:** PBS datastores with an optional namespace, a connection test showing free space, and write-only token secrets stored encrypted.
   - **Backup jobs:** per client, with several folders (picked with a folder browser on the client), exclusions, a schedule, change detection, a speed limit, an encryption key, and one or more destinations.
   - **Each client gets its jobs** as systemd timers and runs them itself, so backups carry on while the server is down. Credentials are encrypted with `systemd-creds` where available. Settings that couldn't be delivered are sent again automatically when the client is back.
@@ -36,7 +38,7 @@ Version 2: a rewrite in Go, renamed PBC Manager. Work in progress; see docs/desi
   - **Pages:** a live log for each run, an Activity page across all clients, snapshot lists from PBS, and the Dashboard showing each job's last 20 runs.
   - **New settings** for how much run history clients and the server keep.
 
-- **Email alerts** (milestone 3b) on a new Alerts page:
+- **Email alerts** on a new Alerts page:
   - **Mail server settings:** SMTP with STARTTLS, SSL or none, an optional sign-in (the password is write-only and encrypted), several recipients, and a test email.
   - **Failed backups,** including interrupted ones, with the reason and the end of the log. **Successful backups** are optional.
   - **Missed backups:** a scheduled backup that didn't start within a grace period you set, judged once the server has heard from the client.
@@ -45,7 +47,7 @@ Version 2: a rewrite in Go, renamed PBC Manager. Work in progress; see docs/desi
   - **Each alert is sent once.** Recent alerts are listed with whether the email went out.
 - **Client time zones:** clients report theirs, so next-run times and missed-backup checks follow the client's clock.
 
-- **Sizes and space** (milestone 4):
+- **Sizes and space**:
   - **Data protected** on the Dashboard: how much data your jobs' folders hold, counting each folder once, and the size of the newest backups.
   - **Destination space** on the Dashboard and Destinations page, amber from 80% used and red from 90%.
   - **Folder sizes** are measured on each client in the background at low priority, every 12 hours and whenever a job's folders change. Missing folders are reported instead of counted as empty. Measure again starts a new measurement.
@@ -53,7 +55,7 @@ Version 2: a rewrite in Go, renamed PBC Manager. Work in progress; see docs/desi
   - **Destination nearly full** email alert, at a percentage you choose (90% by default), and another email when there's room again.
   - **New settings** for how often space, backup sizes and folder sizes are checked.
 
-- **Updates from the web UI** (milestone 5) on a new Updates page:
+- **Updates from the web UI** on a new Updates page:
   - **Check for updates** on GitHub, daily (with a notice on the Dashboard) and when you press Check now. Release notes are shown before you install.
   - **Download and install** in one click, or **upload a release file** for a server without internet access.
   - **Signed releases:** only files signed by the project are accepted. Each file's checksum is checked, and anything unexpected in the archive is refused.
@@ -63,7 +65,7 @@ Version 2: a rewrite in Go, renamed PBC Manager. Work in progress; see docs/desi
   - **Client runners:** after the server updates, each client gets the matching `pbcm-runner`, and checks its signature before replacing itself. The Updates page shows each client's version.
 - `pbcm rollback` puts back the previous version from a terminal, when the service is stopped.
 
-- **Export and import** (milestone 6) under Settings:
+- **Export and import** under Settings:
   - **Download settings:** destinations, jobs, alert settings and Settings page values. Passwords and token secrets are never included.
   - **Import from PBS Backup Manager 1.x:** from its settings export, or from its `config.json` with the credentials. Choose the client it ran on and see a preview first; missing secrets are asked for in the form.
   - **Import a PBC Manager export** on another server; jobs are matched to clients by address.
@@ -71,23 +73,16 @@ Version 2: a rewrite in Go, renamed PBC Manager. Work in progress; see docs/desi
   - **Imported jobs start paused,** so the old and new servers don't both back up the same folders.
 - **User guide** in `docs/guide/`: installing (with an LXC recipe), setting up PBS tokens, clients, updates, moving from 1.x, and troubleshooting. A new README with screenshots.
 
-### Fixed
-- Times in the Recent runs table no longer wrap onto several lines.
-- Removing a client deleted its `pbcm` account up to a minute later than intended, because systemd timers fire late by default. It's now removed within a few seconds.
-- **New setting, "Web address of this server",** so alert emails link to the run.
+- **"Web address of this server"** setting, so alert emails link to the run.
 
 ### Changed
-- The UI runs under a strict Content Security Policy with no inline scripts or styles.
-- UI files are cache-busted by content, so browsers never run a stale script after an upgrade.
-- The layout no longer overflows sideways on very narrow screens.
 - Renamed to **PBC Manager** (program `pbcm`, repository `bradyloveland/pbcmanager`).
-- The Overview page is now the **Dashboard**. It suggests two-step verification only while it's off.
-- Folder browsing starts at `/`.
+- The web UI runs under a strict Content Security Policy with no inline scripts or styles, and browsers never run a stale script after an upgrade.
 
 ### Kept from 1.x
 - Two-step verification with QR enrolment, recovery codes and replay protection.
 - Sign-in throttling per address and for the whole account.
-- Password hashes, so 1.x passwords will carry over when settings import arrives.
+- The same password hashing as 1.x.
 
 ## [1.2.0] - 2026-09-30
 
@@ -120,4 +115,6 @@ First public release.
 ### Added
 - Initial release: destinations, backup jobs with schedules, folder browser, exclusions, speed limits, encryption keys, live logs, run cancellation, snapshot listing, email failure alerts, HTTPS with a self-signed certificate, systemd installer.
 
-[1.2.0]: https://github.com/bradyloveland/pbswebclient/releases/tag/v1.2.0
+[Unreleased]: https://github.com/bradyloveland/pbcmanager/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/bradyloveland/pbcmanager/releases/tag/v2.0.0
+[1.2.0]: https://github.com/bradyloveland/pbcmanager/releases/tag/v1.2.0

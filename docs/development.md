@@ -98,7 +98,7 @@ CI (`.github/workflows/ci.yml`) also installs the built package on an Ubuntu run
 
 ## Making changes
 
-- Work on a branch and open a pull request against `v2` (or `main` once 2.0.0 ships).
+- Work on a branch and open a pull request against `main`. (1.x fixes, if ever needed, go against `v1`.)
 - Add tests with every behaviour change. New endpoints get coverage in `internal/server/server_test.go`.
 - Keep `make check` green.
 - Update `docs/` and add an entry under `## [Unreleased]` in `CHANGELOG.md`.

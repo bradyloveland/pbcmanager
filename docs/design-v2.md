@@ -26,8 +26,7 @@ The project isn't affiliated with or endorsed by Proxmox Server Solutions GmbH. 
 
 ## Versions and branches
 
-- `v2` holds the rewrite until 2.0.0 is ready. `main` stays on 1.2.0 until then.
-- When 2.0.0 ships, `v2` merges into `main`, and a `v1` branch is kept in case 1.x needs a fix.
+- `v2` held the rewrite until 2.0.0. With 2.0.0, `v2` merged into `main`, and the `v1` branch keeps 1.x in case it needs a fix.
 - After 2.0.0: **bug fixes** are patch releases (2.0.1, 2.0.2, …) and **features and enhancements** are minor releases (2.1.0, 2.2.0, …).
 - Releases are published by GitHub Actions from a `vX.Y.Z` tag, as in 1.x.
 
