@@ -243,7 +243,7 @@ function wirePendingButtons(box, p) {
 
 /* ---------- dashboard ---------- */
 async function viewDashboard(token) {
-  const [{clients}, acct] = await Promise.all([api("GET", "/clients"), api("GET", "/account")]);
+  let [{clients}, acct] = await Promise.all([api("GET", "/clients"), api("GET", "/account")]);
   if (token !== routeToken) return;
   // Only nudge about two-step verification while it's off.
   const twoStep = acct.totp_enabled ? "" : `<div class="banner warn"><b>Two-step verification is off.</b> Anyone with your password can manage every client's backups. <a href="#/account">Turn it on</a></div>`;
@@ -257,19 +257,22 @@ async function viewDashboard(token) {
         <a class="btn primary" href="#/clients/new">Add a client</a></div>`);
     return;
   }
-  const trouble = clients.filter(c => c.status !== "ready" && c.status !== "setting-up");
-  const head = trouble.length ? (trouble.length === 1 ? `${trouble[0].name} needs attention` : `${trouble.length} clients need attention`)
-    : clients.length === 1 ? "Your client is ready" : `All ${clients.length} clients are ready`;
   const draw = async () => {
-    const [{jobs}, {sizes}, {destinations}] = await Promise.all([api("GET", "/jobs"), api("GET", "/sizes"), api("GET", "/destinations")]);
+    const [{jobs}, {sizes}, {destinations}, fresh] = await Promise.all([api("GET", "/jobs"), api("GET", "/sizes"), api("GET", "/destinations"), api("GET", "/clients")]);
     if (token !== routeToken) return;
+    clients = fresh.clients;
+    const trouble = clients.filter(c => c.status !== "ready" && c.status !== "setting-up");
+    const head = trouble.length ? (trouble.length === 1 ? `${trouble[0].name} needs attention` : `${trouble.length} clients need attention`)
+      : clients.length === 1 ? "Your client is ready" : `All ${clients.length} clients are ready`;
     const failing = jobs.filter(j => lastFinished(j) && lastFinished(j).status === "failed");
     let cls = trouble.length || failing.length ? "bad" : "ok", title = head;
     if (failing.length) title = failing.length === 1 ? `${failing[0].name} on ${failing[0].client_name} failed its last run` : `${failing.length} jobs failed their last run`;
     else if (!trouble.length && jobs.length) title = jobs.length === 1 ? "Your backup job is healthy" : `All ${jobs.length} backup jobs are healthy`;
     render(`<div class="health ${cls}"><span class="dot"></span><h1>${esc(title)}</h1></div>${updateNote}${twoStep}${jobs.length ? noAlerts : ""}
-      ${jobs.length ? sizeTiles(sizes, destinations, jobs, clients) + jobLedger(jobs, sizes) : `<div class="panel empty"><h2>No backup jobs yet</h2><p>Your clients are ready. Add a destination for your Proxmox Backup Server, then create a job to choose folders and a schedule.</p><div class="btnrow"><a class="btn primary" href="#/jobs/new">Create a backup job</a><a class="btn" href="#/destinations/new">Add a destination</a></div></div>`}
-      <h2 class="mt-16">Clients</h2>${clientsTable(clients)}`);
+      ${jobs.length ? sizeTiles(sizes, destinations, jobs, clients) : `<div class="panel empty"><h2>No backup jobs yet</h2><p>Your clients are ready. Add a destination for your Proxmox Backup Server, then create a job to choose folders and a schedule.</p><div class="btnrow"><a class="btn primary" href="#/jobs/new">Create a backup job</a><a class="btn" href="#/destinations/new">Add a destination</a></div></div>`}
+      <div class="pagehead mt-16 m-0"><h2 class="m-0">Clients and their backups</h2>${clients.length > 1 ? `<div class="btnrow"><button class="btn small" data-groups="open">Expand all</button><button class="btn small" data-groups="close">Collapse all</button></div>` : ""}</div>
+      <div class="cgroups">${clientGroups(clients, jobs, sizes)}</div>`);
+    bindClientGroups(draw);
     bindRowLinks();
     bindRunButtons(draw);
     bindSizeButtons(draw);
@@ -339,6 +342,64 @@ function jobSize(js) {
   return js.measuring ? "measuring…" : "";
 }
 
+/* ---------- clients and their jobs (Dashboard) ---------- */
+// Which client sections are open is remembered in this browser only.
+const GROUPS_KEY = "pbcm.dashboard.open";
+function groupState() { try { return JSON.parse(localStorage.getItem(GROUPS_KEY) || "{}"); } catch (_) { return {}; } }
+function saveGroupState(s) { try { localStorage.setItem(GROUPS_KEY, JSON.stringify(s)); } catch (_) {} }
+
+// clientSummary counts a client's jobs by state.
+function clientSummary(c, jobs) {
+  const mine = jobs.filter(j => j.client_id === c.id);
+  const failing = mine.filter(j => { const l = lastFinished(j); return l && l.status === "failed"; }).length;
+  return {jobs: mine, failing, running: mine.filter(isRunning).length, disabled: mine.filter(j => !j.enabled).length,
+    trouble: failing > 0 || (c.status !== "ready" && c.status !== "setting-up")};
+}
+
+function clientGroups(clients, jobs, sizes) {
+  const saved = groupState();
+  return [...clients].sort((a, b) => a.name.localeCompare(b.name)).map(c => {
+    const s = clientSummary(c, jobs);
+    // Problems are never hidden in a closed section.
+    const open = s.trouble || clients.length === 1 || saved[c.id] === true;
+    const counts = [plural(s.jobs.length, "job"), s.running && `${s.running} running`, s.failing && `${s.failing} failing`, s.disabled && `${s.disabled} disabled`].filter(Boolean);
+    const id = "cg-" + c.id;
+    return `<section class="cgroup ${s.trouble ? "trouble" : ""}">
+      <div class="cghead">
+        <button type="button" class="cgtoggle" aria-expanded="${open}" aria-controls="${esc(id)}" data-group="${esc(c.id)}" ${s.trouble || clients.length === 1 ? 'data-pinned="1"' : ""}>
+          <span class="chev" aria-hidden="true"></span>
+          <span class="cgname"><b>${esc(c.name)}</b><span class="sub mono">${esc(c.address)}${c.port === 22 ? "" : ":" + esc(c.port)}</span></span>
+          ${clientPill(c.status)}
+          <span class="cgcounts">${counts.map(x => `<span class="${/failing/.test(x) ? "bad-text" : /running/.test(x) ? "busy-text" : ""}">${esc(x)}</span>`).join(" · ")}</span>
+          <span class="cgmeta sub">${esc(ago(c.last_contact))}${c.client_version ? ` · client ${esc(c.client_version)}` : ""}</span>
+        </button>
+        <a class="btn small" href="#/clients/${esc(c.id)}">Client details</a>
+      </div>
+      <div class="cgbody" id="${esc(id)}" ${open ? "" : "hidden"}>
+        ${s.jobs.length ? jobLedger(s.jobs, sizes, {noClient: true})
+          : `<div class="cgempty"><span class="muted">No backup jobs yet.</span> <a href="#/jobs/new/${esc(c.id)}">Create a backup job</a></div>`}
+      </div>
+    </section>`;
+  }).join("");
+}
+
+function bindClientGroups(redraw) {
+  const setOpen = (btn, open) => {
+    btn.setAttribute("aria-expanded", String(open));
+    $("#" + btn.getAttribute("aria-controls")).hidden = !open;
+  };
+  $$("[data-group]").forEach(btn => btn.addEventListener("click", () => {
+    const open = btn.getAttribute("aria-expanded") !== "true";
+    setOpen(btn, open);
+    const s = groupState(); s[btn.dataset.group] = open; saveGroupState(s);
+  }));
+  $$("[data-groups]").forEach(b => b.addEventListener("click", () => {
+    const open = b.dataset.groups === "open", s = groupState();
+    $$("[data-group]").forEach(btn => { if (!open && btn.dataset.pinned) return; setOpen(btn, open); s[btn.dataset.group] = open; });
+    saveGroupState(s);
+  }));
+}
+
 /* ---------- jobs ---------- */
 const STATUS_WORD = {success: "Succeeded", failed: "Failed", running: "Running", cancelled: "Cancelled"};
 const runPill = st => `<span class="pill ${{success: "ok", failed: "bad", running: "busy", cancelled: "warn"}[st] || "idle"}">${esc(STATUS_WORD[st] || st)}</span>`;
@@ -402,12 +463,12 @@ function nextText(j) {
   if (!j.next_run) return `<b>By hand</b><div class="sub">Start it with Run now</div>`;
   return `<b>${esc(fmtTime(j.next_run))}</b><div class="sub">${esc(schedText(j.schedule))}</div>`;
 }
-function jobLedger(jobs, sizes) {
+function jobLedger(jobs, sizes, opts = {}) {
   return `<div class="ledger">
     <div class="ledger-head"><div>Job</div><div>Last 20 runs, oldest to newest</div><div>Last result</div><div>Next run</div><div></div></div>
     ${jobs.map(j => `<div class="jobrow ${j.enabled ? "" : "disabled"}">
       <div><a class="jobname" href="#/jobs/${esc(j.id)}">${esc(j.name)}</a>
-        <div class="sub">${esc(j.client_name)} to ${esc(j.destination_names.join(", ") || "no destination")}</div>
+        <div class="sub">${opts.noClient ? "To" : esc(j.client_name) + " to"} ${esc(j.destination_names.join(", ") || "no destination")}</div>
         ${sizes && jobSize(sizes.jobs[j.id]) ? `<div class="sub">${esc(jobSize(sizes.jobs[j.id]))}</div>` : ""}</div>
       ${tape(j.recent, j.client_id)}
       ${jobState(j)}
