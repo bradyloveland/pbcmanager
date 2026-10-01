@@ -4,7 +4,7 @@ Context for Claude Code sessions working on this repository.
 
 ## What this is
 
-Proxmox Backup Client Web Manager (`pbcwm`), version 2: a Go rewrite of PBS Backup Manager 1.x.
+PBC Manager (`pbcm`), version 2: a Go rewrite of PBS Backup Manager 1.x.
 - A central server (usually in a Debian LXC) manages file-level backups on many Linux clients over SSH.
 - Clients run their own schedules (systemd timers) and back up straight to Proxmox Backup Server. **Clients must never depend on the server:** if it's down, backups still run.
 - The owner's environment is Debian-based: OpenMediaVault, Debian, Proxmox hosts. Clients are reached on the LAN or over a VPN, never the public internet.
@@ -13,7 +13,7 @@ The plan is in `docs/design-v2.md`, and progress by milestone is in `README.md`.
 
 ## Hard rules
 
-- **No terminal needed after install.** Every setting must be visible and changeable in the web UI. The only CLI-only things are the first install and the lock-out recovery commands (`pbcwm passwd`, `pbcwm totp-reset`, `pbcwm network --reset`).
+- **No terminal needed after install.** Every setting must be visible and changeable in the web UI. The only CLI-only things are the first install and the lock-out recovery commands (`pbcm passwd`, `pbcm totp-reset`, `pbcm network --reset`).
 - **Settings changes must keep working for existing installs.** Schema changes are new numbered files in `internal/store/migrations/`, never edits to old ones. The installer upgrades in place and must not reset settings.
 - **Credentials are write-only.**
   - Secrets are encrypted at rest (`internal/secret`) and never returned by the API or included in exports.

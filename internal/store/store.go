@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/secret"
+	"github.com/bradyloveland/pbcmanager/internal/secret"
 	_ "modernc.org/sqlite"
 )
 

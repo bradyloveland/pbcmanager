@@ -34,7 +34,7 @@ func SelfSigned(commonName string, hosts []string) (certPEM, keyPEM []byte, err 
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: commonName, Organization: []string{"PBC Web Manager (self-signed)"}},
+		Subject:               pkix.Name{CommonName: commonName, Organization: []string{"PBC Manager (self-signed)"}},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().AddDate(10, 0, 0),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,

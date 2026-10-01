@@ -11,7 +11,7 @@ const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "
 let session = null, routeToken = 0, pendingTimer = null;
 
 async function api(method, path, body) {
-  const opts = {method, headers: {"X-PBCWM": "1"}, credentials: "same-origin"};
+  const opts = {method, headers: {"X-PBCM": "1"}, credentials: "same-origin"};
   if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
   let res;
   try { res = await fetch("api" + path, opts); }
@@ -43,12 +43,12 @@ function showGate(which) {
   $$("#gate [data-error]").forEach(e => e.classList.add("hidden"));
   const name = session ? session.server_name : "";
   if (which === "setup") {
-    $("#gate-title").textContent = "Set up PBC Web Manager";
+    $("#gate-title").textContent = "Set up PBC Manager";
     $("#gate-sub").textContent = name ? `Finish setting up the server on ${name}.` : "";
     $("#setup-form").classList.remove("hidden");
     setTimeout(() => $("#setup-form [name=code]").focus(), 0);
   } else {
-    $("#gate-title").textContent = "PBC Web Manager";
+    $("#gate-title").textContent = "PBC Manager";
     $("#gate-sub").textContent = name ? `Sign in to manage backups from ${name}.` : "";
     loginTicket = null;
     $("#login-form").classList.remove("hidden");
@@ -75,7 +75,7 @@ function setRecoveryMode(on) {
   inp.placeholder = on ? "xxxxx-xxxxx" : "";
   $("#totp-label").textContent = on ? "Recovery code" : "Verification code";
   $("#totp-help").textContent = on ? "Enter one of the recovery codes you saved when you set up two-step verification. Each code works once."
-    : "Open your authenticator app and enter the 6-digit code for PBC Web Manager.";
+    : "Open your authenticator app and enter the 6-digit code for PBC Manager.";
   $("#use-recovery").textContent = on ? "Use my authenticator app instead" : "Use a recovery code instead";
   $("#totp-form [data-error]").classList.add("hidden");
   inp.focus();
@@ -158,7 +158,7 @@ function showApp() {
   $("#app").classList.remove("hidden");
   $("#server-name").textContent = session.server_name;
   $("#version").textContent = `Version ${session.version}`;
-  document.title = `${session.server_name} · PBC Web Manager`;
+  document.title = `${session.server_name} · PBC Manager`;
   drawPendingBanner();
   route();
 }
@@ -166,7 +166,10 @@ function showApp() {
 function render(html) { $("#view").innerHTML = html; }
 
 const routes = [
-  [/^#\/overview$/, "overview", viewOverview],
+  [/^#\/(?:dashboard|overview)$/, "dashboard", viewDashboard],
+  [/^#\/clients$/, "clients", viewClients],
+  [/^#\/clients\/new$/, "clients", viewClientNew],
+  [/^#\/clients\/(\w+)$/, "clients", viewClient],
   [/^#\/settings$/, "settings", viewSettings],
   [/^#\/account$/, "account", viewAccount],
   [/^#\/confirm-network\/([\w-]+)$/, "settings", viewConfirmNetwork],
@@ -175,9 +178,9 @@ const routes = [
 async function route() {
   if (!session || !session.user) return;
   const token = ++routeToken;
-  const hash = location.hash || "#/overview";
+  const hash = location.hash || "#/dashboard";
   const match = routes.find(([re]) => re.test(hash));
-  if (!match) { location.hash = "#/overview"; return; }
+  if (!match) { location.hash = "#/dashboard"; return; }
   const [re, nav, fn] = match;
   $$(".nav a").forEach(a => a.dataset.nav === nav ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"));
   render(`<div class="loading">Loading…</div>`);
@@ -220,17 +223,323 @@ function wirePendingButtons(box, p) {
   };
 }
 
-/* ---------- overview ---------- */
-async function viewOverview() {
-  render(`<div class="health"><span class="dot"></span><h1>No clients yet</h1></div>
-    <div class="panel empty"><h2>The server is ready</h2>
-      <p>Adding clients, destinations and backup jobs comes in the next development milestones. For now you can finish setting up the server itself.</p>
-      <div class="btnrow" role="group"><a class="btn primary" href="#/account">Turn on two-step verification</a><a class="btn" href="#/settings">Review settings</a></div></div>`);
+/* ---------- dashboard ---------- */
+async function viewDashboard(token) {
+  const [{clients}, acct] = await Promise.all([api("GET", "/clients"), api("GET", "/account")]);
+  if (token !== routeToken) return;
+  // Only nudge about two-step verification while it's off.
+  const twoStep = acct.totp_enabled ? "" : `<div class="banner warn"><b>Two-step verification is off.</b> Anyone with your password can manage every client's backups. <a href="#/account">Turn it on</a></div>`;
+  if (!clients.length) {
+    render(`<div class="health"><span class="dot"></span><h1>No clients yet</h1></div>${twoStep}
+      <div class="panel empty"><h2>Add your first client</h2>
+        <p>A client is a Linux machine whose folders you want to back up. The server connects to it over SSH once to set it up; after that the client backs up on its own.</p>
+        <a class="btn primary" href="#/clients/new">Add a client</a></div>`);
+    return;
+  }
+  const trouble = clients.filter(c => c.status !== "ready" && c.status !== "setting-up");
+  const head = trouble.length ? (trouble.length === 1 ? `${trouble[0].name} needs attention` : `${trouble.length} clients need attention`)
+    : clients.length === 1 ? "Your client is ready" : `All ${clients.length} clients are ready`;
+  render(`<div class="health ${trouble.length ? "bad" : "ok"}"><span class="dot"></span><h1>${esc(head)}</h1></div>${twoStep}
+    <p class="lede">Backup jobs and their results arrive in the next development milestone.</p>
+    ${clientsTable(clients)}`);
+  bindRowLinks();
+}
+
+/* ---------- clients ---------- */
+const CLIENT_STATUS = {ready: ["ok", "Ready"], "setting-up": ["busy", "Setting up"], error: ["bad", "Needs attention"],
+  unreachable: ["warn", "Can't connect"], "host-key-changed": ["bad", "Host key changed"]};
+const clientPill = st => { const [cls, label] = CLIENT_STATUS[st] || ["warn", st]; return `<span class="pill ${cls}">${esc(label)}</span>`; };
+function ago(ts) {
+  if (!ts) return "never";
+  const s = Math.round(Date.now() / 1000 - ts);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return `${Math.floor(s / 86400)} d ago`;
+}
+function hostKeyFile(type) {
+  if ((type || "").startsWith("ecdsa")) return "/etc/ssh/ssh_host_ecdsa_key.pub";
+  return {"ssh-ed25519": "/etc/ssh/ssh_host_ed25519_key.pub", "ssh-rsa": "/etc/ssh/ssh_host_rsa_key.pub"}[type] || "/etc/ssh/ssh_host_*_key.pub";
+}
+function bindRowLinks() {
+  $$("tr[data-href]").forEach(tr => tr.addEventListener("click", e => { if (!e.target.closest("a,button")) location.hash = tr.dataset.href; }));
+}
+function clientsTable(clients) {
+  return `<div class="panel tablewrap"><table>
+    <thead><tr><th>Client</th><th>Status</th><th>System</th><th>Backup client</th><th>Last contact</th></tr></thead>
+    <tbody>${clients.map(c => `<tr class="clickable" data-href="#/clients/${esc(c.id)}">
+      <td><a class="jobname" href="#/clients/${esc(c.id)}">${esc(c.name)}</a><div class="sub mono">${esc(c.address)}${c.port === 22 ? "" : ":" + esc(c.port)}</div></td>
+      <td>${clientPill(c.status)}</td>
+      <td class="small">${esc(c.os_pretty || "—")}${c.arch ? `<div class="sub">${esc(c.arch)}</div>` : ""}</td>
+      <td class="small">${c.client_version ? esc(c.client_version) : "—"}</td>
+      <td class="small">${esc(ago(c.last_contact))}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+async function viewClients(token) {
+  const {clients} = await api("GET", "/clients");
+  if (token !== routeToken) return;
+  render(`<div class="pagehead"><div><h1>Clients</h1><p class="lede">The machines this server manages. Each one keeps its own backup schedule, so it carries on if this server is down.</p></div>
+    <a class="btn primary" href="#/clients/new">Add a client</a></div>
+    ${clients.length ? clientsTable(clients) : `<div class="panel empty"><h2>No clients yet</h2><p>Add a Linux machine you can reach over SSH from this server, on your network or over a VPN.</p><a class="btn primary" href="#/clients/new">Add a client</a></div>`}`);
+  bindRowLinks();
+}
+
+// Follows a task's log into box until it finishes, then calls done(view).
+function followTask(taskId, box, token, done) {
+  let offset = 0;
+  const pre = $(".log", box) || (() => { const p = document.createElement("pre"); p.className = "log"; box.append(p); return p; })();
+  const tick = async () => {
+    if (token !== routeToken) return;
+    let v;
+    try { v = await api("GET", `/tasks/${taskId}?offset=${offset}`); }
+    catch (ex) { pre.insertAdjacentHTML("beforeend", `<span class="err">${esc(ex.message)}</span>\n`); return; }
+    if (token !== routeToken) return;
+    const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
+    pre.insertAdjacentHTML("beforeend", v.lines.map(l => {
+      const cls = l.startsWith("ERROR:") ? "err" : l.startsWith("==>") || l.startsWith("Ready:") ? "step" : "";
+      return cls ? `<span class="${cls}">${esc(l)}</span>\n` : esc(l) + "\n";
+    }).join(""));
+    if (atBottom) pre.scrollTop = pre.scrollHeight;
+    offset = v.offset;
+    if (v.done) { done(v); return; }
+    setTimeout(tick, 1000);
+  };
+  tick();
+}
+
+// The sign-in choices used for setup and repair. The password is used once
+// and never saved.
+function signInFields(pubkey) {
+  return `<div class="choice" role="radiogroup" aria-label="How to sign in for setup">
+      <label class="check"><input type="radio" name="method" value="root" checked><span><b>root, with its password</b></span></label>
+      <label class="check"><input type="radio" name="method" value="sudo"><span><b>Another user who can use sudo</b><br><span class="hint">For machines where root can't sign in over SSH.</span></span></label>
+      <label class="check"><input type="radio" name="method" value="key"><span><b>root, with this server's key</b><br><span class="hint">If you've already added the key below to root's <span class="mono">~/.ssh/authorized_keys</span>.</span></span></label>
+    </div>
+    <div class="formgrid">
+      <label class="field" data-show="sudo"><span>Username</span><input type="text" name="user" autocomplete="off" placeholder="admin"></label>
+      <label class="field" data-show="root sudo"><span>Password</span><input type="password" name="password" autocomplete="new-password">
+        <small>Used once to set the client up, then forgotten. It's never saved.</small></label>
+      <div class="field full" data-show="key"><span>This server's public key</span><div class="keybox">${esc(pubkey)}</div></div>
+    </div>`;
+}
+function wireSignIn(form) {
+  const sync = () => {
+    const m = form.method.value;
+    $$("[data-show]", form).forEach(el => el.classList.toggle("hidden", !el.dataset.show.split(" ").includes(m)));
+  };
+  $$("[name=method]", form).forEach(r => r.addEventListener("change", sync));
+  sync();
+  return () => {
+    const m = form.method.value;
+    return {user: m === "sudo" ? form.user.value : "root", password: m === "key" ? "" : form.password.value, use_key: m === "key"};
+  };
+}
+function hostKeyCheck(p, current) {
+  return `<p class="m-0">${current ? "The client now shows this SSH host key" : "The client's SSH host key fingerprint is"}:</p>
+    <div class="fp">${esc(p.fingerprint)}</div>
+    <p class="hint m-0">Check it's really the client before going on. On the client, run <span class="mono">ssh-keygen -lf ${esc(hostKeyFile(p.type))}</span> and compare. A mismatch means you might be connecting to the wrong machine.</p>
+    <label class="check mt-12"><input type="checkbox" name="matches"><span>The fingerprint matches</span></label>`;
+}
+
+async function viewClientNew(token) {
+  const ssh = await api("GET", "/settings/ssh");
+  if (token !== routeToken) return;
+  const st = {name: "", address: "", port: 22, probe: null};
+  const steps = ["Address", "Host key", "Sign in", "Set up"];
+  const frame = (n, body) => render(`<a class="back" href="#/clients">‹ Clients</a><h1>Add a client</h1>
+    <p class="lede">The server signs in once as root (or a sudo user) to install the backup client if needed and create a limited <span class="mono">pbcm</span> account. After that it only uses that account.</p>
+    <ol class="wizard-steps">${steps.map((s, i) => `<li class="${i === n ? "on" : i < n ? "done" : ""}">${i + 1}. ${s}</li>`).join("")}</ol>
+    <div class="panel">${body}</div>`);
+
+  const step1 = () => {
+    frame(0, `<form id="cf" novalidate><div class="formgrid">
+        <label class="field"><span>Address</span><input type="text" name="address" value="${esc(st.address)}" placeholder="nas.lan or 192.0.2.20" autocomplete="off"><small>A host name or IP address this server can reach: on your network or over a VPN.</small></label>
+        <label class="field"><span>SSH port</span><input type="number" name="port" value="${esc(st.port)}" min="1" max="65535"></label>
+        <label class="field"><span>Name</span><input type="text" name="name" value="${esc(st.name)}" placeholder="Same as the address" maxlength="64"><small>How it's shown here, like “NAS” or “Web server”.</small></label>
+      </div><div id="c-err"></div>
+      <div class="formfoot"><button class="btn primary" type="submit">Next: check its host key</button></div></form>`);
+    const f = $("#cf");
+    f.address.focus();
+    f.addEventListener("submit", async e => {
+      e.preventDefault();
+      Object.assign(st, {address: f.address.value.trim(), port: Number(f.port.value) || 22, name: f.name.value.trim()});
+      const btn = $("button[type=submit]", f); btn.disabled = true; $("#c-err").innerHTML = `<div class="result info">Connecting…</div>`;
+      try { st.probe = await api("POST", "/clients/probe", {address: st.address, port: st.port}); step2(); }
+      catch (ex) { $("#c-err").innerHTML = `<div class="result bad">${esc(ex.message)}</div>`; btn.disabled = false; }
+    });
+  };
+  const step2 = () => {
+    frame(1, `<form id="cf" novalidate>${hostKeyCheck(st.probe)}<div id="c-err"></div>
+      <div class="formfoot"><div class="btnrow"><button class="btn primary" type="submit">Next: sign in</button><button class="btn" type="button" id="c-back">Back</button></div></div></form>`);
+    const f = $("#cf");
+    $("#c-back").onclick = step1;
+    f.addEventListener("submit", e => {
+      e.preventDefault();
+      if (!f.matches.checked) { $("#c-err").innerHTML = `<div class="result bad">Compare the fingerprint with the client first, then tick the box.</div>`; return; }
+      step3();
+    });
+  };
+  const step3 = () => {
+    frame(2, `<form id="cf" novalidate><p class="m-0">How should the server sign in to <b>${esc(st.address)}</b> for setup?</p>${signInFields(ssh.public_key)}<div id="c-err"></div>
+      <div class="formfoot"><div class="btnrow"><button class="btn primary" type="submit">Set up the client</button><button class="btn" type="button" id="c-back">Back</button></div></div></form>`);
+    const f = $("#cf");
+    const read = wireSignIn(f);
+    $("#c-back").onclick = step2;
+    f.addEventListener("submit", async e => {
+      e.preventDefault();
+      const btn = $("button[type=submit]", f); btn.disabled = true; $("#c-err").innerHTML = "";
+      try {
+        const r = await api("POST", "/clients", {name: st.name, address: st.address, port: st.port, host_key: st.probe.host_key, login: read()});
+        f.password.value = "";
+        step4(r.client, r.task);
+      } catch (ex) { $("#c-err").innerHTML = `<div class="result bad">${esc(ex.message)}</div>`; btn.disabled = false; }
+    });
+  };
+  const step4 = (client, taskId) => {
+    frame(3, `<h2>Setting up ${esc(client.name)}</h2><p class="hint m-0">This can take a few minutes if the backup client has to be installed.</p><div id="c-log"></div><div id="c-done"></div>`);
+    followTask(taskId, $("#c-log"), token, v => {
+      $("#c-done").innerHTML = v.ok
+        ? `<div class="result ok">${esc(client.name)} is ready.</div><div class="btnrow mt-12"><a class="btn primary" href="#/clients/${esc(client.id)}">Open ${esc(client.name)}</a><a class="btn" href="#/clients/new">Add another client</a></div>`
+        : `<div class="result bad">${esc(v.error || "Setup didn't finish.")}</div><div class="btnrow mt-12"><a class="btn primary" href="#/clients/${esc(client.id)}">Open ${esc(client.name)} to repair it</a></div>`;
+    });
+  };
+  step1();
+}
+
+async function viewClient(id, token) {
+  const [{client: c, task}, ssh] = await Promise.all([api("GET", `/clients/${id}`), api("GET", "/settings/ssh")]);
+  if (token !== routeToken) return;
+  const banner = {
+    error: `<div class="banner bad"><b>This client needs attention.</b> ${esc(c.status_detail)}</div>`,
+    unreachable: `<div class="banner warn"><b>The server can't reach this client right now.</b> ${esc(c.status_detail)} Backups on the client keep running on their own schedule.</div>`,
+    "host-key-changed": `<div class="banner bad"><b>The client's SSH host key has changed.</b> The server won't connect until you decide.
+      <dl class="kv mt-12"><dt>Trusted key</dt><dd class="mono">${esc(c.host_key_fingerprint)}</dd><dt>Key it shows now</dt><dd class="mono">${esc(c.offered_fingerprint)}</dd></dl>
+      <p class="m-0 mt-12">If you reinstalled the client or its SSH server, use <b>Repair</b> to trust the new key. Otherwise, find out why before trusting it.</p></div>`,
+  }[c.status] || "";
+  render(`<a class="back" href="#/clients">‹ Clients</a>
+    <div class="pagehead"><div><h1>${esc(c.name)} ${clientPill(c.status)}</h1><p class="lede">${esc(c.os_pretty || c.address)}</p></div>
+      <div class="btnrow"><button class="btn" id="c-check">Check now</button><button class="btn" id="c-browse" ${c.status === "ready" ? "" : "disabled"}>Browse folders</button></div></div>
+    ${banner}
+    <div class="cols"><div class="stack">
+      <div class="panel" id="c-task" ${task && !task.done ? "" : "hidden"}><h2>Setup</h2></div>
+      <div class="panel"><h2>Repair</h2><p class="hint m-0 mb-14">Runs setup again as root: reinstalls pbcm-runner, the pbcm account and its sudo rule, and the backup client if it's missing. Use it after reinstalling the client, if its host key changed, or if something was removed by hand.</p>
+        <button class="btn" id="c-repair">Repair ${esc(c.name)}</button><div id="c-repair-flow"></div></div>
+      <div class="panel"><h2>Remove</h2><p class="hint m-0 mb-14">Stops managing this client.</p>
+        <button class="btn danger" id="c-remove">Remove ${esc(c.name)}</button><div id="c-remove-flow"></div></div>
+    </div>
+    <div class="panel"><h2>Details</h2><dl class="kv">
+      <dt>Address</dt><dd class="mono">${esc(c.address)} port ${esc(c.port)}</dd>
+      <dt>Host name</dt><dd>${esc(c.hostname || "—")}</dd>
+      <dt>System</dt><dd>${esc(c.os_pretty || "—")}${c.arch ? `, ${esc(c.arch)}` : ""}</dd>
+      <dt>systemd</dt><dd>${esc(c.systemd_version || "—")}</dd>
+      <dt>Backup client</dt><dd>${c.client_version ? `proxmox-backup-client ${esc(c.client_version)}` : `<span class="muted">Not found</span>`}</dd>
+      <dt>pbcm-runner</dt><dd>${esc(c.runner_version || "—")}</dd>
+      <dt>Last contact</dt><dd>${esc(ago(c.last_contact))}</dd>
+      <dt>SSH host key</dt><dd class="mono break">${esc(c.host_key_fingerprint)}</dd>
+      ${c.server_here ? `<dt>Note</dt><dd>This server runs on this machine too.</dd>` : ""}
+    </dl></div></div>`);
+
+  if (task && !task.done) {
+    followTask(task.id, $("#c-task"), token, () => setTimeout(() => token === routeToken && route(), 800));
+  }
+  $("#c-check").onclick = async e => {
+    e.target.disabled = true;
+    try {
+      const r = await api("POST", `/clients/${id}/check`);
+      if (r.error) toast(r.error, "bad"); else toast(`${c.name} is reachable.`);
+      route();
+    } catch (ex) { toast(ex.message, "bad"); e.target.disabled = false; }
+  };
+  $("#c-browse").onclick = () => pickFolder(id, "/", false);
+
+  $("#c-repair").onclick = async () => {
+    $("#c-repair").classList.add("hidden");
+    const box = $("#c-repair-flow");
+    box.innerHTML = `<div class="subform"><div class="result info">Checking the client's host key…</div></div>`;
+    let probe;
+    try { probe = await api("POST", "/clients/probe", {address: c.address, port: c.port}); }
+    catch (ex) { box.innerHTML = `<div class="result bad">${esc(ex.message)}</div>`; $("#c-repair").classList.remove("hidden"); return; }
+    const changed = probe.fingerprint !== c.host_key_fingerprint;
+    box.innerHTML = `<form class="subform" id="rf" novalidate>
+      ${changed ? hostKeyCheck(probe, true) : `<p class="m-0 ok-text">The host key is the one already trusted.</p>`}
+      ${signInFields(ssh.public_key)}<div id="r-err"></div>
+      <div class="btnrow mt-16"><button class="btn primary" type="submit">Run setup again</button><button class="btn" type="button" id="r-cancel">Cancel</button></div></form>`;
+    const f = $("#rf"), read = wireSignIn(f);
+    $("#r-cancel").onclick = () => route();
+    f.addEventListener("submit", async e => {
+      e.preventDefault();
+      if (changed && !f.matches.checked) { $("#r-err").innerHTML = `<div class="result bad">Compare the new fingerprint with the client first, then tick the box.</div>`; return; }
+      const btn = $("button[type=submit]", f); btn.disabled = true;
+      try {
+        const r = await api("POST", `/clients/${id}/repair`, {login: read(), host_key: changed ? probe.host_key : ""});
+        f.password.value = "";
+        box.innerHTML = `<div class="subform"><div id="r-log"></div><div id="r-done"></div></div>`;
+        followTask(r.task, $("#r-log"), token, v => {
+          $("#r-done").innerHTML = v.ok ? `<div class="result ok">Repaired.</div>` : `<div class="result bad">${esc(v.error || "Repair didn't finish.")}</div>`;
+          setTimeout(() => token === routeToken && v.ok && route(), 1500);
+        });
+      } catch (ex) { $("#r-err").innerHTML = `<div class="result bad">${esc(ex.message)}</div>`; btn.disabled = false; }
+    });
+  };
+
+  $("#c-remove").onclick = () => {
+    $("#c-remove").classList.add("hidden");
+    $("#c-remove-flow").innerHTML = `<form class="subform" id="xf" novalidate>
+      <div class="choice">
+        <label class="check"><input type="radio" name="how" value="uninstall" checked><span><b>Remove everything this server put on the client</b><br>
+          <span class="hint">The pbcm account, its sudo rule, pbcm-runner and the client's settings. proxmox-backup-client stays installed, and backups already on PBS aren't touched.</span></span></label>
+        <label class="check"><input type="radio" name="how" value="list"><span><b>Only remove it from this list</b><br><span class="hint">For a client that's gone or can't be reached. Anything on it stays as it is.</span></span></label>
+      </div>
+      <label class="check"><input type="checkbox" name="keep" checked><span>Keep its run history on the client</span></label>
+      <div id="x-err"></div>
+      <div class="btnrow mt-16"><button class="btn danger" type="submit">Remove ${esc(c.name)}</button><button class="btn" type="button" id="x-cancel">Cancel</button></div></form>`;
+    const f = $("#xf");
+    $("#x-cancel").onclick = () => route();
+    f.addEventListener("submit", async e => {
+      e.preventDefault();
+      const btn = $("button[type=submit]", f); btn.disabled = true; $("#x-err").innerHTML = "";
+      try {
+        await api("POST", `/clients/${id}/remove`, {uninstall: f.how.value === "uninstall", keep_history: f.keep.checked});
+        toast(`${c.name} removed.`);
+        location.hash = "#/clients";
+      } catch (ex) { $("#x-err").innerHTML = `<div class="result bad">${esc(ex.message)}</div>`; btn.disabled = false; }
+    });
+  };
+}
+
+/* ---------- folder picker ---------- */
+function pickFolder(clientId, start, choosing) {
+  const dlg = $("#picker");
+  let current = start;
+  $("#picker-choose").classList.toggle("hidden", !choosing);
+  $("#picker-cancel").textContent = choosing ? "Cancel" : "Close";
+  return new Promise(resolve => {
+    const icon = `<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h5l1.5 1.5h6.5v8h-13z" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>`;
+    const load = async path => {
+      $("#picker-list").innerHTML = `<li class="loading">Loading…</li>`;
+      try {
+        const d = await api("GET", `/clients/${clientId}/browse?path=${encodeURIComponent(path)}`);
+        current = d.path;
+        $("#picker-path").textContent = d.path;
+        $("#picker-list").innerHTML = (d.parent ? `<li><button type="button" data-p="${esc(d.parent)}">${icon}<span>Up one level</span></button></li>` : "") +
+          (d.dirs.length ? d.dirs.map(n => `<li><button type="button" data-p="${esc((d.path === "/" ? "" : d.path) + "/" + n)}">${icon}<span class="mono">${esc(n)}</span></button></li>`).join("")
+            : `<li class="muted small loading">No folders inside this one.</li>`) +
+          (d.more ? `<li class="muted small loading">Only the first 1000 folders are shown.</li>` : "");
+        $$("#picker-list [data-p]").forEach(b => b.addEventListener("click", () => load(b.dataset.p)));
+      } catch (ex) { $("#picker-list").innerHTML = `<li class="result bad">${esc(ex.message)}</li>`; }
+    };
+    const done = v => { dlg.close(); resolve(v); };
+    $("#picker-choose").onclick = () => done(current);
+    $("#picker-cancel").onclick = () => done(null);
+    dlg.onclose = () => resolve(null);
+    dlg.showModal();
+    load(start);
+  });
 }
 
 /* ---------- settings ---------- */
 async function viewSettings(token) {
-  const [s, n] = await Promise.all([api("GET", "/settings"), api("GET", "/settings/network")]);
+  const [s, n, ssh] = await Promise.all([api("GET", "/settings"), api("GET", "/settings/network"), api("GET", "/settings/ssh")]);
   if (token !== routeToken) return;
   const field = d => {
     const v = s.values[d.key], id = "set-" + d.key.replace(/\W/g, "-");
@@ -249,12 +558,19 @@ async function viewSettings(token) {
       <div class="formfoot"><button class="btn primary" type="submit">Save settings</button></div>
     </form>
     <div class="panel" id="netpanel"></div>
+    <div class="panel"><h2>SSH</h2><p class="hint m-0 mb-14">The key this server signs in to clients with. Setup adds it to each client's pbcm account automatically; you only need it here if you'd rather add it for root by hand before adding a client.</p>
+      <dl class="kv"><dt>Public key</dt><dd><div class="keybox">${esc(ssh.public_key)}</div><button class="btn small mt-12" id="copy-key">Copy</button></dd>
+      <dt>Fingerprint</dt><dd class="mono">${esc(ssh.fingerprint)}</dd></dl></div>
     <div class="panel"><h2>About</h2><dl class="kv">
       <dt>Version</dt><dd>${esc(session.version)}</dd>
-      <dt>Project</dt><dd><a href="https://github.com/bradyloveland/proxmoxbackupclientwebmanager" rel="noopener noreferrer" target="_blank">github.com/bradyloveland/proxmoxbackupclientwebmanager</a></dd>
+      <dt>Project</dt><dd><a href="https://github.com/bradyloveland/pbcmanager" rel="noopener noreferrer" target="_blank">github.com/bradyloveland/pbcmanager</a></dd>
       <dt>Updates</dt><dd class="muted">Updating from this page arrives in a later development milestone.</dd>
     </dl></div>`);
 
+  $("#copy-key").onclick = async () => {
+    try { await navigator.clipboard.writeText(ssh.public_key); toast("Public key copied."); }
+    catch (_) { toast("Couldn't copy. Select the key and copy it by hand.", "bad"); }
+  };
   const form = $("#sform");
   form.addEventListener("submit", async e => {
     e.preventDefault();
@@ -396,12 +712,12 @@ function codesBlock(codes) {
     <div class="btnrow"><button type="button" class="btn small" id="codes-copy">Copy codes</button><button type="button" class="btn small" id="codes-dl">Download as a text file</button><button type="button" class="btn primary small" id="codes-done">I've saved them</button></div>`;
 }
 function bindCodes(codes, done) {
-  const text = `PBC Web Manager recovery codes for ${session.server_name}\nEach code can be used once.\n\n${codes.join("\n")}\n`;
+  const text = `PBC Manager recovery codes for ${session.server_name}\nEach code can be used once.\n\n${codes.join("\n")}\n`;
   $("#codes-copy").onclick = async () => { try { await navigator.clipboard.writeText(text); toast("Recovery codes copied."); } catch (_) { toast("Couldn't copy. Select the codes and copy them by hand.", "bad"); } };
   $("#codes-dl").onclick = () => {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([text], {type: "text/plain"}));
-    a.download = `pbcwm-recovery-codes-${session.server_name}.txt`;
+    a.download = `pbcm-recovery-codes-${session.server_name}.txt`;
     document.body.append(a); a.click(); a.remove();
   };
   $("#codes-done").onclick = done;
@@ -432,10 +748,10 @@ async function viewAccount(token) {
       <div class="formfoot"><button class="btn primary" type="submit">Change password</button></div>
     </form>
     <div class="panel"><h2>Locked out?</h2><p class="hint m-0 mb-14">These commands run on the server itself, for when the web UI can't help.</p><dl class="kv">
-      <dt>Forgot the password</dt><dd class="mono">sudo pbcwm passwd</dd>
-      <dt>Lost the authenticator</dt><dd class="mono">sudo pbcwm totp-reset</dd>
-      <dt>Can't reach the web UI</dt><dd><span class="mono">sudo pbcwm network --reset</span> <span class="muted">(every interface, port 8099, self-signed HTTPS)</span></dd>
-      <dt>Service log</dt><dd class="mono">journalctl -u pbcwm</dd>
+      <dt>Forgot the password</dt><dd class="mono">sudo pbcm passwd</dd>
+      <dt>Lost the authenticator</dt><dd class="mono">sudo pbcm totp-reset</dd>
+      <dt>Can't reach the web UI</dt><dd><span class="mono">sudo pbcm network --reset</span> <span class="muted">(every interface, port 8099, self-signed HTTPS)</span></dd>
+      <dt>Service log</dt><dd class="mono">journalctl -u pbcm</dd>
     </dl></div>`);
 
   const box = $("#twofa");
@@ -545,7 +861,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   } catch (ex) {
     const f = $("#fatal");
     f.className = "banner bad";
-    f.textContent = `Can't reach the PBC Web Manager service: ${ex.message}`;
+    f.textContent = `Can't reach the PBC Manager service: ${ex.message}`;
     return;
   }
   if (session.setup_needed) showGate("setup");

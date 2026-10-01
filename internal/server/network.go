@@ -14,8 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/config"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/tlscert"
+	"github.com/bradyloveland/pbcmanager/internal/config"
+	"github.com/bradyloveland/pbcmanager/internal/tlscert"
 )
 
 // A network change that could lock the user out is "pending" until it's

@@ -118,9 +118,9 @@ func TestTOTPToleratesSpacesAndRejectsJunk(t *testing.T) {
 }
 
 func TestTOTPURI(t *testing.T) {
-	uri := TOTPURI("ABCDEFGH", "PBC Web Manager", "nas:admin")
-	for _, want := range []string{"otpauth://totp/PBC%20Web%20Manager:nas:admin?", "secret=ABCDEFGH",
-		"issuer=PBC%20Web%20Manager", "period=30", "digits=6"} {
+	uri := TOTPURI("ABCDEFGH", "PBC Manager", "nas:admin")
+	for _, want := range []string{"otpauth://totp/PBC%20Manager:nas:admin?", "secret=ABCDEFGH",
+		"issuer=PBC%20Manager", "period=30", "digits=6"} {
 		if !strings.Contains(uri, want) {
 			t.Errorf("%s missing %q", uri, want)
 		}

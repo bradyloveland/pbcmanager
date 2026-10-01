@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/config"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/tlscert"
+	"github.com/bradyloveland/pbcmanager/internal/config"
+	"github.com/bradyloveland/pbcmanager/internal/tlscert"
 )
 
 func (s *Server) settingValues() map[string]any {
