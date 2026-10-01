@@ -42,6 +42,9 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/settings/network/regenerate-certificate", priv(s.apiNetworkRegenerate))
 
 	m.HandleFunc("GET /api/settings/ssh", priv(s.apiSSH))
+	m.HandleFunc("GET /api/settings/export", priv(s.apiExport))
+	m.HandleFunc("POST /api/settings/import/preview", s.apiLimit(true, maxImport, s.apiImportPreview))
+	m.HandleFunc("POST /api/settings/import", s.apiLimit(true, maxImport, s.apiImport))
 	m.HandleFunc("GET /api/clients", priv(s.apiClients))
 	m.HandleFunc("POST /api/clients", priv(s.apiClientAdd))
 	m.HandleFunc("POST /api/clients/probe", priv(s.apiClientProbe))

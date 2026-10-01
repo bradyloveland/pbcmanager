@@ -281,8 +281,12 @@ Every setting that was CLI-only or config-file-only in 1.x is on a **Settings** 
 
 ## Moving from 1.x
 
-- **Import a 1.2.0 settings export** (Account, Export settings). The importer asks which client the 1.x jobs belong to, for example the OMV box, and adds it as a client if needed. Each job keeps its single destination. The export has no credentials, so they're entered afterwards.
-- **Also accept the 1.x `config.json` itself,** which contains the secrets, so nothing needs re-entering. The UI warns that the file holds credentials, and the server doesn't keep the uploaded file.
+- **Import a 1.2.0 settings export** (Account, Export settings) under Settings → Export and import. The importer asks which client the 1.x jobs belong to, for example the OMV box. That client must be added first. Each job keeps its single destination and its backup ID, so backups continue in the same PBS group. The export has no credentials, so the import form asks for each token secret, key file password and the mail password.
+- **Also accept the 1.x `config.json` itself,** which contains the secrets, so nothing needs re-entering. The UI says that the file holds credentials, and the server doesn't keep the uploaded file.
+- **A preview first.** The browser sends the file to be checked, and nothing is saved until the import is confirmed. Then it's all or nothing.
+- **Duplicates are avoided.** Destinations that match one already on the server (same host, datastore, user and token) are reused. Jobs already on the client are skipped, and names that are taken get "(imported)".
+- **Imported jobs start paused,** so 1.x and version 2 don't both back up the same folders. They're turned on once 1.x is stopped.
+- **The same panel exports this server's settings** (without credentials) and imports them on another server. Jobs are matched to clients by address, and clients have to be added again over SSH first.
 - 1.x run history isn't carried over.
 - Once the new server's jobs are running, the docs walk through stopping and uninstalling 1.x on the OMV box. Both can run side by side while you compare.
 
@@ -343,7 +347,7 @@ Everything in 1.2.0, now per client:
 | **M3: backups** | Destinations and per-client overrides, jobs with several destinations, `apply`, timers, `run`/`start`/`cancel`, credentials on clients, status catch-up, live logs, snapshots, email alerts including missed and unreachable |
 | **M4: dashboard** | Folder sizes measured on clients, newest backup sizes, destination space, Data protected and Destination space widgets, nearly-full alerts |
 | **M5: updates** | Signed releases, update check (daily and on demand), upload, optional automatic install in a chosen hour, swap, confirm, automatic and manual rollback, runner updates to clients |
-| **M6: moving from 1.x and release** | 1.x import, docs, LXC recipe, testing on your machines → **2.0.0** |
+| **M6: moving from 1.x and release** | Settings export and import, 1.x import, user guide (LXC recipe, PBS tokens, clients, updates, moving from 1.x, troubleshooting), README with screenshots, testing on your machines → **2.0.0** |
 
 Each milestone ends with passing tests and a pull request into `v2`, so you can try it in a test LXC as it grows.
 

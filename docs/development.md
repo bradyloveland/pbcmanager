@@ -16,6 +16,7 @@ internal/alerts/    Email alerts: SMTP settings and sending, deciding what to al
 internal/auth/      Password hashing, TOTP, recovery codes, sign-in throttling
 internal/config/    Every setting: definitions, defaults, checks. Network settings.
 internal/qr/        QR codes for authenticator enrolment (standard library only)
+internal/migrate/   Settings export, and importing it or a 1.x export/config.json (preview, then apply)
 internal/release/   Release signing: the signed MANIFEST, checking archives, comparing versions, the trusted keys
 internal/update/    Updating the server from the web UI: GitHub check, staging, swapping files, rollback
 internal/secret/    Encryption for secrets stored in the database
@@ -28,7 +29,7 @@ install.sh          Installer and upgrader for the server
 uninstall.sh
 scripts/            Release helpers and CI's update test
 tools/pbcm-sign/    Writes and signs a release folder's MANIFEST (used by make dist)
-docs/               Documentation, including the version 2 design
+docs/               The version 2 design, this page, guide/ (user documentation) and screenshots/
 ```
 
 ## Architecture (milestone 1)
