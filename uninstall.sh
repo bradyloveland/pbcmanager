@@ -26,7 +26,7 @@ rm -rf /opt/pbcwm
 if [[ $PURGE -eq 1 ]]; then
   rm -rf /etc/pbcwm /var/lib/pbcwm
   if id -u pbcwm >/dev/null 2>&1; then userdel pbcwm 2>/dev/null || true; fi
-  getent group pbcwm >/dev/null && groupdel pbcwm 2>/dev/null || true
+  if getent group pbcwm >/dev/null; then groupdel pbcwm 2>/dev/null || true; fi
   echo "Removed, including all settings and data."
 else
   echo "Removed. Settings and data are still in /etc/pbcwm and /var/lib/pbcwm."
