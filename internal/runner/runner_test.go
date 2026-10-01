@@ -153,7 +153,7 @@ func TestUninstallRemovesOnlyOurFiles(t *testing.T) {
 		t.Error("unrelated files must stay")
 	}
 	last := (*calls)[len(*calls)-1]
-	if !strings.HasPrefix(last, "systemd-run") || !strings.Contains(last, "userdel pbcm") || strings.Contains(last, "rm -rf") {
+	if !strings.HasPrefix(last, "systemd-run") || !strings.Contains(last, "userdel -f pbcm") || strings.Contains(last, "rm -rf") {
 		t.Fatalf("account removal: %s", last)
 	}
 	_ = out

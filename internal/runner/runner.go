@@ -380,7 +380,10 @@ func Uninstall(env *Env, keepHistory bool) error {
 		say("The server runs on this machine and uses the %s account, so the account was kept.", Account)
 		return nil
 	}
-	script := "sleep 3; pkill -KILL -u " + Account + " 2>/dev/null; userdel " + Account
+	// The SSH session that asked for this (and its systemd --user manager)
+	// keeps the account busy, so end its sessions and retry for a while.
+	script := "sleep 3; loginctl terminate-user " + Account + " 2>/dev/null; pkill -KILL -u " + Account + " 2>/dev/null; " +
+		"for i in 1 2 3 4 5 6; do userdel -f " + Account + " && break; sleep 2; pkill -KILL -u " + Account + " 2>/dev/null; done"
 	if !keepHistory && home != "" {
 		script += "; rm -rf " + home
 	}

@@ -171,9 +171,15 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("uninstall:\n%s", out)
-	time.Sleep(8 * time.Second)
-	if out, code := asRoot("id pbcm"); code == 0 {
-		t.Fatalf("the pbcm account should be gone: %s", out)
+	gone := false
+	for i := 0; i < 15 && !gone; i++ {
+		time.Sleep(2 * time.Second)
+		_, code := asRoot("id pbcm")
+		gone = code != 0
+	}
+	if !gone {
+		out, _ := asRoot("journalctl --no-pager -n 30 -u pbcm-remove-account; systemctl status pbcm-remove-account.service --no-pager; ps -u pbcm -o pid,cmd")
+		t.Fatalf("the pbcm account should be gone after uninstall:\n%s", out)
 	}
 	if out, _ := asRoot("ls /etc/systemd/system/ | grep -c pbcm-job || true"); strings.TrimSpace(out) != "0" {
 		t.Fatalf("units left behind: %s", out)
