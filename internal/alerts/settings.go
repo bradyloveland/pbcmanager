@@ -35,13 +35,15 @@ type Settings struct {
 	MissedGraceMinutes int    `json:"missed_grace_minutes"`
 	OnUnreachable      bool   `json:"on_unreachable"`
 	UnreachableMinutes int    `json:"unreachable_minutes"`
+	OnFull             bool   `json:"on_full"`
+	FullPercent        int    `json:"full_percent"`
 }
 
 // Defaults are a fresh install's settings: off until set up, then failures,
-// missed backups and outages, but not successes.
+// missed backups, outages and nearly full destinations, but not successes.
 func Defaults() Settings {
 	return Settings{Port: 587, Security: "starttls", OnFailure: true, OnMissed: true, MissedGraceMinutes: 60,
-		OnUnreachable: true, UnreachableMinutes: 60}
+		OnUnreachable: true, UnreachableMinutes: 60, OnFull: true, FullPercent: 90}
 }
 
 // Input is the settings form. An empty Password keeps the saved one.
@@ -117,6 +119,12 @@ func Clean(in Input, saved Settings) (Settings, error) {
 	}
 	if s.UnreachableMinutes < 5 || s.UnreachableMinutes > 10080 {
 		return s, bad("Wait between 5 minutes and 7 days before reporting a client that can't be reached.")
+	}
+	if s.FullPercent == 0 {
+		s.FullPercent = 90
+	}
+	if s.FullPercent < 50 || s.FullPercent > 99 {
+		return s, bad("Report a destination as nearly full somewhere between 50%% and 99%%.")
 	}
 	if s.Host != "" && !hostRE.MatchString(s.Host) {
 		return s, bad("Enter the mail server's host name or IP address.")

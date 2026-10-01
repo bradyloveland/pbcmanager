@@ -165,6 +165,26 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("cancel: %+v", cancelled)
 	}
 
+	// Folder sizes are measured by a background systemd unit on the client.
+	if err := m.MeasureFolders(ctx, c.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	var etc, unmounted bundle.FolderSize
+	deadline = time.Now().Add(2 * time.Minute)
+	for time.Now().Before(deadline) {
+		time.Sleep(2 * time.Second)
+		m.SyncClient(ctx, c.ID)
+		st.GetSize(backups.SizeFolder, backups.FolderKey(c.ID, "/etc"), &etc)
+		st.GetSize(backups.SizeFolder, backups.FolderKey(c.ID, "/not/mounted"), &unmounted)
+		if !etc.Measuring && etc.Bytes != nil && unmounted.Error != "" {
+			break
+		}
+	}
+	if etc.Bytes == nil || *etc.Bytes < 100000 || !strings.Contains(unmounted.Error, "not found") {
+		t.Fatalf("folder sizes: /etc %+v, missing %+v", etc, unmounted)
+	}
+	t.Logf("/etc measured at %d bytes in %.1fs", *etc.Bytes, etc.Seconds)
+
 	// Uninstall removes the timers, the credentials and (shortly after) the account.
 	out, err := m.Remove(ctx, c.ID, true, false)
 	if err != nil {

@@ -39,6 +39,7 @@ var Groups = []Group{
 	{"general", "General"},
 	{"security", "Sign-in and sessions"},
 	{"history", "Run history"},
+	{"sizes", "Sizes and space"},
 }
 
 // Defs lists every setting. New milestones add theirs here, and the Settings
@@ -62,6 +63,15 @@ var Defs = []Def{
 	{Key: "history.server_runs", Group: "history", Label: "Runs kept on this server",
 		Help: "Across all clients. The oldest runs and their logs are removed first.",
 		Type: "int", Unit: "runs", Min: 100, Max: 100000, Default: 5000},
+	{Key: "sizes.space_minutes", Group: "sizes", Label: "Check destination space every",
+		Help: "How often this server asks each PBS server how full its datastore is.",
+		Type: "int", Unit: "minutes", Min: 5, Max: 1440, Default: 15},
+	{Key: "sizes.backup_minutes", Group: "sizes", Label: "Check backup sizes every",
+		Help: "How often this server looks up the newest backup of each job on each destination. It also checks right after every successful backup.",
+		Type: "int", Unit: "minutes", Min: 15, Max: 1440, Default: 60},
+	{Key: "sizes.folder_hours", Group: "sizes", Label: "Measure backed-up folders every",
+		Help: "Clients add up how much data is in each folder at low priority, so it doesn't slow them down. Large folders can take a while. Set to 0 to measure only when you ask.",
+		Type: "int", Unit: "hours", Min: 0, Max: 720, Default: 12},
 }
 
 // Lookup returns the definition for key.

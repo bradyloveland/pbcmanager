@@ -131,6 +131,16 @@ func Dispatch(env *Env, args []string) error {
 		return Uninstall(env, keep)
 	case "apply":
 		return Apply(env, env.Stdin)
+	case "measure":
+		if err := measureUsage(args); err != nil {
+			return err
+		}
+		return Measure(env, args[1:])
+	case "measure-run":
+		if err := measureUsage(args); err != nil {
+			return err
+		}
+		return MeasureRun(env, args[1])
 	case "run":
 		if len(args) < 2 {
 			return &UsageError{"run needs a job ID"}
@@ -408,6 +418,7 @@ func Uninstall(env *Env, keepHistory bool) error {
 	}
 	script += "; rmdir /etc/pbcm 2>/dev/null; true"
 	if _, err := env.Exec("systemd-run", "--quiet", "--collect", "--unit=pbcm-remove-account", "--on-active=2",
+		"--timer-property=AccuracySec=1s", // timers may otherwise fire up to a minute late
 		"/bin/sh", "-c", script); err != nil {
 		say("Remove the %s account by hand when convenient: userdel %s", Account, Account)
 		return nil

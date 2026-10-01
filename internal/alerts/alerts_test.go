@@ -128,6 +128,7 @@ func TestClean(t *testing.T) {
 		"bad security":      func(i *Input) { i.Security = "tls13" },
 		"header injection":  func(i *Input) { i.From = "a@b.c\r\nBcc: x@y.z" },
 		"short grace":       func(i *Input) { i.MissedGraceMinutes = 1 },
+		"full at 100%":      func(i *Input) { i.FullPercent = 100 },
 	} {
 		bad := in
 		bad.ClearPassword = false
@@ -377,5 +378,39 @@ func TestNothingWhenDisabled(t *testing.T) {
 	e.n.RunFinished(client(), &store.Run{ClientID: "c1", Run: bundle.Run{ID: "r1", Status: bundle.Failed}})
 	if len(e.messages()) != 0 {
 		t.Fatal("alerts are off")
+	}
+}
+
+func TestDestinationNearlyFull(t *testing.T) {
+	e := newEnv(t)
+	d := &store.Destination{ID: "d1", Name: "Home PBS", Host: "192.0.2.10", Datastore: "store"}
+	gib := int64(1) << 30
+	since := e.n.Space(d, 80*gib, 100*gib, 0)
+	if since != 0 || len(e.messages()) != 0 {
+		t.Fatal("80% is under the default 90%")
+	}
+	since = e.n.Space(d, 93*gib, 100*gib, since)
+	since = e.n.Space(d, 94*gib, 100*gib, since)
+	msgs := e.messages()
+	if since == 0 || len(msgs) != 1 || !strings.Contains(msgs[0], "Destination nearly full: Home PBS (93%)") ||
+		!strings.Contains(msgs[0], "7.0 GiB free") {
+		t.Fatalf("nearly full: %d %v", since, msgs)
+	}
+	// Hovering just under the threshold doesn't count as having room again.
+	if again := e.n.Space(d, 89*gib, 100*gib, since); again != since {
+		t.Fatal("89% is within the margin")
+	}
+	since = e.n.Space(d, 70*gib, 100*gib, since)
+	msgs = e.messages()
+	if since != 0 || len(msgs) != 2 || !strings.Contains(msgs[1], "has room again") {
+		t.Fatalf("room again: %v", msgs)
+	}
+}
+
+func TestBytes(t *testing.T) {
+	for n, want := range map[int64]string{0: "0 B", 1023: "1023 B", 1536: "1.5 KiB", 50 << 20: "50 MiB", 3 << 40: "3.0 TiB"} {
+		if got := Bytes(n); got != want {
+			t.Errorf("Bytes(%d) = %q, want %q", n, got, want)
+		}
 	}
 }

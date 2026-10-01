@@ -252,6 +252,60 @@ func (n *Notifier) checkMissed(c *store.Client, s Settings, now time.Time) {
 	}
 }
 
+// Space is told each new space reading for a destination. fullSince is
+// when it went over the nearly-full threshold (0 if it wasn't); the new value
+// is returned for saving. It alerts once each time a destination fills up,
+// and once more when there's room again.
+func (n *Notifier) Space(d *store.Destination, used, total, fullSince int64) int64 {
+	if total <= 0 {
+		return fullSince
+	}
+	s := n.Settings()
+	pct := float64(used) * 100 / float64(total)
+	switch {
+	case pct >= float64(s.FullPercent) && fullSince == 0:
+		fullSince = n.now().Unix()
+		if s.OnFull {
+			body := fmt.Sprintf("The datastore %s on the PBS server %s (destination \"%s\") is %.0f%% full: %s used of %s, %s free.\n\n"+
+				"Backups to it will fail once it's full. Free up space by pruning old backups and running garbage collection on the PBS server, or give the datastore more room.\n",
+				d.Datastore, d.Host, d.Name, pct, Bytes(used), Bytes(total), Bytes(total-used))
+			if l := n.link("/destinations"); l != "" {
+				body += "\n" + l + "\n"
+			}
+			n.deliver(&store.Alert{Key: fmt.Sprintf("full:%s:%d", d.ID, fullSince), Kind: "full",
+				Subject: fmt.Sprintf("Destination nearly full: %s (%.0f%%)", d.Name, pct)}, body)
+		}
+	case fullSince != 0 && pct < float64(s.FullPercent)-2:
+		// A little below the threshold, so hovering around it doesn't
+		// send an email every check.
+		if had, _ := n.Store.HasAlert(fmt.Sprintf("full:%s:%d", d.ID, fullSince)); had {
+			n.deliver(&store.Alert{Key: fmt.Sprintf("roomy:%s:%d", d.ID, fullSince), Kind: "space_ok",
+				Subject: "Destination has room again: " + d.Name},
+				fmt.Sprintf("The datastore %s on %s (destination \"%s\") is now %.0f%% full, %s free.\n", d.Datastore, d.Host, d.Name, pct, Bytes(total-used)))
+		}
+		fullSince = 0
+	}
+	return fullSince
+}
+
+// Bytes formats a size the way the web UI does (1 KiB = 1024 bytes).
+func Bytes(n int64) string {
+	units := []string{"B", "KiB", "MiB", "GiB", "TiB", "PiB"}
+	v := float64(n)
+	i := 0
+	for v >= 1024 && i < len(units)-1 {
+		v /= 1024
+		i++
+	}
+	if i == 0 {
+		return fmt.Sprintf("%d B", n)
+	}
+	if v < 10 {
+		return fmt.Sprintf("%.1f %s", v, units[i])
+	}
+	return fmt.Sprintf("%.0f %s", v, units[i])
+}
+
 // Loop runs Check every minute until ctx ends.
 func (n *Notifier) Loop(ctx context.Context) {
 	t := time.NewTicker(time.Minute)

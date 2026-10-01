@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/bradyloveland/pbcmanager/internal/backups"
 	"github.com/bradyloveland/pbcmanager/internal/bundle"
 	"github.com/bradyloveland/pbcmanager/internal/clients/clienttest"
 	"github.com/bradyloveland/pbcmanager/internal/runner"
@@ -440,5 +441,61 @@ func TestOfflineClientIsMarkedAndBackupsStayPending(t *testing.T) {
 	}
 	if c, _ = h.st.GetClient(c.ID); c.ApplyError == "" {
 		t.Fatal("the apply error should be recorded")
+	}
+}
+
+func TestFolderSizesAreMeasuredAndCollected(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.m.Sync.FolderEvery = func() time.Duration { return 12 * time.Hour }
+	c, j := h.jobSetup(t, "/srv/media")
+	h.host.WriteFile("/srv/media/a.bin", strings.Repeat("x", 1000))
+	if err := h.m.Apply(ctx, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	// The first check asks the client to measure; the next one collects it.
+	h.m.SyncClient(ctx, c.ID)
+	h.m.SyncClient(ctx, c.ID)
+	var f bundle.FolderSize
+	if ok, _ := h.st.GetSize(backups.SizeFolder, backups.FolderKey(c.ID, "/srv/media"), &f); !ok || f.Bytes == nil || *f.Bytes != 1000 || f.Measuring {
+		t.Fatalf("folder size: %+v", f)
+	}
+	measures := func() int {
+		n := 0
+		for _, e := range h.host.Execs() {
+			if strings.Contains(e.Cmd, "measure") {
+				n++
+			}
+		}
+		return n
+	}
+	before := measures()
+	h.m.SyncClient(ctx, c.ID)
+	if measures() != before {
+		t.Fatal("a fresh measurement shouldn't be repeated")
+	}
+
+	h.host.WriteFile("/srv/media/b.bin", strings.Repeat("y", 500))
+	if err := h.m.MeasureFolders(ctx, c.ID, j.ID); err != nil {
+		t.Fatal(err)
+	}
+	h.m.SyncClient(ctx, c.ID)
+	sum, err := backups.Summarise(h.st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.FolderTotal == nil || *sum.FolderTotal != 1500 || sum.Jobs[j.ID].FolderBytes == nil || !sum.Jobs[j.ID].FolderComplete {
+		t.Fatalf("summary: %+v %+v", sum, sum.Jobs[j.ID])
+	}
+
+	// A folder that's gone is reported, not counted as empty.
+	j.Shares = append(j.Shares, bundle.Share{Path: "/mnt/usb", Archive: "usb"})
+	h.st.SaveJob(j)
+	h.m.MeasureFolders(ctx, c.ID, "")
+	h.m.SyncClient(ctx, c.ID)
+	sum, _ = backups.Summarise(h.st)
+	js := sum.Jobs[j.ID]
+	if js.FolderComplete || len(js.FolderErrors) != 1 || !strings.Contains(js.FolderErrors[0], "not found") {
+		t.Fatalf("missing folder: %+v", js)
 	}
 }

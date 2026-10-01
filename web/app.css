@@ -223,6 +223,18 @@ details.adv[open] > summary{margin-bottom:16px}
 .meter{height:10px;border-radius:5px;background:var(--surface-2);border:1px solid var(--line);overflow:hidden;margin-top:8px}
 .meter i{display:block;height:100%;background:var(--ok);border-radius:5px 0 0 5px}
 .meter.warn i{background:var(--warn)} .meter.bad i{background:var(--bad)}
+
+/* Dashboard size tiles */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:18px;margin:0 0 24px}
+.tiles > .panel + .panel{margin-top:0}
+.tilehead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.tilehead h2{margin:0}
+.bignum{font-size:32px;font-weight:650;letter-spacing:-.01em;line-height:1.15;margin-bottom:4px}
+.destspace + .destspace{margin-top:16px}
+.destname{font-size:14px}
+.spaceline{display:flex;justify-content:space-between;gap:10px;margin-top:4px}
+.warn-text{color:var(--warn)}
+.mt-8{margin-top:8px}
 .pill.idle{background:var(--surface-2);color:var(--muted)}
 
 /* Live log */

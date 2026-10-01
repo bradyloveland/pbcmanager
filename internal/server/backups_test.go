@@ -58,6 +58,7 @@ func TestBackupsEndToEnd(t *testing.T) {
 	host := clienttest.New(t)
 	clientID := addClient(t, c, host)
 	host.Mkdir("/srv/media")
+	host.WriteFile("/srv/media/song.flac", strings.Repeat("x", 4096))
 
 	// Destinations: the secret is write-only.
 	dest := map[string]any{"name": "Home PBS", "host": "192.0.2.10", "datastore": "store", "username": "nas@pbs",
@@ -123,6 +124,20 @@ func TestBackupsEndToEnd(t *testing.T) {
 	expect(t, r, 200, `"group":"host/`)
 	expect(t, r, 200, `"verified":"ok"`)
 
+	// Sizes: destination space and the newest backup come from the
+	// server's client; folder sizes are measured on the client.
+	waitFor(t, "sizes", 15*time.Second, func() bool {
+		r := c.get("/api/sizes")
+		return strings.Contains(r.body, `"used":250`) && strings.Contains(r.body, `"backup_bytes":1234`) &&
+			strings.Contains(r.body, `"folder_total":4096`)
+	})
+	host.WriteFile("/srv/media/more.flac", strings.Repeat("y", 1024))
+	expect(t, c.post("/api/clients/"+clientID+"/measure", map[string]any{"job": jobID}), 200, "")
+	waitFor(t, "the folder to be measured again", 15*time.Second, func() bool {
+		return strings.Contains(c.get("/api/sizes").body, `"folder_total":5120`)
+	})
+	expect(t, c.post("/api/sizes/check", map[string]any{}), 200, "")
+
 	// Editing keeps the key password unless replaced.
 	edit := map[string]any{}
 	for k, v := range job {
@@ -148,7 +163,7 @@ func TestBackupsEndToEnd(t *testing.T) {
 func TestBackupEndpointsNeedSignIn(t *testing.T) {
 	e := newEnv(t, nil, true)
 	c := e.client()
-	for _, p := range []string{"/api/destinations", "/api/jobs", "/api/runs", "/api/jobs/x/snapshots"} {
+	for _, p := range []string{"/api/destinations", "/api/jobs", "/api/runs", "/api/jobs/x/snapshots", "/api/sizes"} {
 		expect(t, c.get(p), 401, "")
 	}
 	c.login()

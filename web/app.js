@@ -258,20 +258,82 @@ async function viewDashboard(token) {
   const head = trouble.length ? (trouble.length === 1 ? `${trouble[0].name} needs attention` : `${trouble.length} clients need attention`)
     : clients.length === 1 ? "Your client is ready" : `All ${clients.length} clients are ready`;
   const draw = async () => {
-    const {jobs} = await api("GET", "/jobs");
+    const [{jobs}, {sizes}, {destinations}] = await Promise.all([api("GET", "/jobs"), api("GET", "/sizes"), api("GET", "/destinations")]);
     if (token !== routeToken) return;
     const failing = jobs.filter(j => lastFinished(j) && lastFinished(j).status === "failed");
     let cls = trouble.length || failing.length ? "bad" : "ok", title = head;
     if (failing.length) title = failing.length === 1 ? `${failing[0].name} on ${failing[0].client_name} failed its last run` : `${failing.length} jobs failed their last run`;
     else if (!trouble.length && jobs.length) title = jobs.length === 1 ? "Your backup job is healthy" : `All ${jobs.length} backup jobs are healthy`;
     render(`<div class="health ${cls}"><span class="dot"></span><h1>${esc(title)}</h1></div>${twoStep}${jobs.length ? noAlerts : ""}
-      ${jobs.length ? jobLedger(jobs) : `<div class="panel empty"><h2>No backup jobs yet</h2><p>Your clients are ready. Add a destination for your Proxmox Backup Server, then create a job to choose folders and a schedule.</p><div class="btnrow"><a class="btn primary" href="#/jobs/new">Create a backup job</a><a class="btn" href="#/destinations/new">Add a destination</a></div></div>`}
+      ${jobs.length ? sizeTiles(sizes, destinations, jobs, clients) + jobLedger(jobs, sizes) : `<div class="panel empty"><h2>No backup jobs yet</h2><p>Your clients are ready. Add a destination for your Proxmox Backup Server, then create a job to choose folders and a schedule.</p><div class="btnrow"><a class="btn primary" href="#/jobs/new">Create a backup job</a><a class="btn" href="#/destinations/new">Add a destination</a></div></div>`}
       <h2 class="mt-16">Clients</h2>${clientsTable(clients)}`);
     bindRowLinks();
     bindRunButtons(draw);
+    bindSizeButtons(draw);
+    sizeMeters($("#view"));
   };
   await draw();
   poll(draw, 10000);
+}
+
+/* ---------- sizes ---------- */
+// spaceClass colours a datastore that's filling up: amber from 80%, red from 90%.
+const spaceClass = pct => pct >= 90 ? "bad" : pct >= 80 ? "warn" : "";
+const spacePct = sp => sp && sp.total ? Math.round(sp.used / sp.total * 100) : null;
+function spaceHtml(sp, name) {
+  if (!sp) return `<div class="sub">Not checked yet.</div>`;
+  if (sp.error) return `<div class="sub bad-text">${esc(sp.error)}</div>`;
+  const pct = spacePct(sp);
+  if (pct == null) return `<div class="sub">The datastore didn't report its size.</div>`;
+  return `<div class="meter ${spaceClass(pct)}" data-pct="${pct}" role="img" aria-label="${esc(name)}: ${pct}% used"><i></i></div>
+    <div class="sub spaceline"><span>${bytes(sp.used)} of ${bytes(sp.total)} used, ${bytes(sp.avail)} free</span><b class="${pct >= 90 ? "bad-text" : pct >= 80 ? "warn-text" : ""}">${pct}%</b></div>`;
+}
+function sizeTiles(sz, destinations, jobs, clients) {
+  const folders = new Set(), onClients = new Set();
+  jobs.forEach(j => j.shares.forEach(sh => { folders.add(j.client_id + ":" + sh.path); onClients.add(j.client_id); }));
+  const measuring = sz.measuring ? `<span class="pill busy">Measuring</span>` : "";
+  let main = `<div class="bignum">${sz.folder_total == null ? "—" : bytes(sz.folder_total)}</div>`;
+  let sub = sz.folder_total == null
+    ? (sz.measuring ? "Clients are measuring their folders. Large folders can take a while." : "Folders haven't been measured yet.")
+    : `In ${plural(folders.size, "folder")} on ${plural(onClients.size, "client")}${sz.folder_pending ? `, ${plural(sz.folder_pending, "folder")} not measured yet` : ""}. Measured ${esc(ago(sz.folder_measured))}.`;
+  const failed = sz.folder_failed ? `<div class="sub warn-text mt-8">${plural(sz.folder_failed, "folder")} couldn't be measured. The job pages say why.</div>` : "";
+  const latest = sz.backup_total == null ? "" : `<div class="sub mt-8">Newest backups, as PBS counts them: <b>${bytes(sz.backup_total)}</b></div>`;
+  const ready = clients.filter(c => c.status === "ready" && jobs.some(j => j.client_id === c.id)).map(c => c.id);
+  const used = destinations.filter(d => d.used_by.length);
+  return `<div class="tiles">
+    <div class="panel"><div class="tilehead"><h2>Data protected</h2>${measuring}</div>${main}<div class="sub">${sub}</div>${failed}${latest}
+      ${ready.length ? `<div class="btnrow mt-12"><button class="btn small" data-measure="${esc(ready.join(","))}">Measure again</button></div>` : ""}</div>
+    <div class="panel"><div class="tilehead"><h2>Destination space</h2></div>
+      ${used.length ? used.map(d => `<div class="destspace"><div class="destname"><a class="jobname" href="#/destinations/${esc(d.id)}">${esc(d.name)}</a></div>${spaceHtml(sz.destinations[d.id], d.name)}</div>`).join("") : `<p class="muted">No destinations in use.</p>`}
+      ${used.length ? `<div class="btnrow mt-12"><button class="btn small" data-checkspace>Check now</button><span class="sub">${esc(checkedText(used.map(d => sz.destinations[d.id])))}</span></div>` : ""}</div>
+  </div>`;
+}
+function checkedText(list) {
+  const times = list.filter(Boolean).map(x => x.checked).filter(Boolean);
+  return times.length ? "Checked " + ago(Math.min(...times)) : "";
+}
+function bindSizeButtons(refresh, job) {
+  $$("[data-measure]").forEach(b => b.addEventListener("click", async () => {
+    b.disabled = true;
+    try {
+      await Promise.all(b.dataset.measure.split(",").map(id => api("POST", `/clients/${id}/measure`, job ? {job} : {})));
+      toast("Measuring in the background. Sizes update when it's done.");
+      setTimeout(refresh, 4000);
+    } catch (ex) { toast(ex.message, "bad"); b.disabled = false; }
+  }));
+  $$("[data-checkspace]").forEach(b => b.addEventListener("click", async () => {
+    b.disabled = true;
+    try { await api("POST", "/sizes/check", b.dataset.checkspace ? {destination: b.dataset.checkspace} : job ? {job} : {}); toast("Checking with PBS."); setTimeout(refresh, 4000); }
+    catch (ex) { toast(ex.message, "bad"); b.disabled = false; }
+  }));
+}
+// jobSize is the short size shown with a job: its folders, or failing that
+// its newest backup.
+function jobSize(js) {
+  if (!js) return "";
+  if (js.folder_bytes != null) return (js.folder_complete ? "" : "at least ") + bytes(js.folder_bytes);
+  if (js.backup_bytes != null) return bytes(js.backup_bytes) + " last backup";
+  return js.measuring ? "measuring…" : "";
 }
 
 /* ---------- jobs ---------- */
@@ -337,12 +399,13 @@ function nextText(j) {
   if (!j.next_run) return `<b>By hand</b><div class="sub">Start it with Run now</div>`;
   return `<b>${esc(fmtTime(j.next_run))}</b><div class="sub">${esc(schedText(j.schedule))}</div>`;
 }
-function jobLedger(jobs) {
+function jobLedger(jobs, sizes) {
   return `<div class="ledger">
     <div class="ledger-head"><div>Job</div><div>Last 20 runs, oldest to newest</div><div>Last result</div><div>Next run</div><div></div></div>
     ${jobs.map(j => `<div class="jobrow ${j.enabled ? "" : "paused"}">
       <div><a class="jobname" href="#/jobs/${esc(j.id)}">${esc(j.name)}</a>
-        <div class="sub">${esc(j.client_name)} to ${esc(j.destination_names.join(", ") || "no destination")}</div></div>
+        <div class="sub">${esc(j.client_name)} to ${esc(j.destination_names.join(", ") || "no destination")}</div>
+        ${sizes && jobSize(sizes.jobs[j.id]) ? `<div class="sub">${esc(jobSize(sizes.jobs[j.id]))}</div>` : ""}</div>
       ${tape(j.recent, j.client_id)}
       ${jobState(j)}
       <div class="small">${nextText(j)}</div>
@@ -367,16 +430,19 @@ function bindRunButtons(refresh) {
 }
 
 async function viewJobs(token) {
-  const [{jobs}, {clients}, {destinations}] = await Promise.all([api("GET", "/jobs"), api("GET", "/clients"), api("GET", "/destinations")]);
+  const [{jobs}, {clients}, {destinations}, {sizes}] = await Promise.all([api("GET", "/jobs"), api("GET", "/clients"), api("GET", "/destinations"), api("GET", "/sizes")]);
   if (token !== routeToken) return;
   const missing = !clients.length ? ["a client", "#/clients/new", "Add a client"] : !destinations.length ? ["a destination", "#/destinations/new", "Add a destination"] : null;
   render(`<div class="pagehead"><div><h1>Backup jobs</h1><p class="lede">Each job backs up folders on one client to one or more destinations, on its own schedule.</p></div>
     ${missing ? "" : `<a class="btn primary" href="#/jobs/new">Create a backup job</a>`}</div>
-    ${jobs.length ? jobLedger(jobs) : `<div class="panel empty"><h2>No jobs yet</h2><p>${missing ? `Add ${missing[0]} first, so jobs have something to back up${missing[0] === "a client" ? "" : " to"}.` : "Create a job to choose folders and a schedule."}</p>
+    ${jobs.length ? jobLedger(jobs, sizes) : `<div class="panel empty"><h2>No jobs yet</h2><p>${missing ? `Add ${missing[0]} first, so jobs have something to back up${missing[0] === "a client" ? "" : " to"}.` : "Create a job to choose folders and a schedule."}</p>
       <a class="btn primary" href="${missing ? missing[1] : "#/jobs/new"}">${missing ? missing[2] : "Create a backup job"}</a></div>`}`);
   const refresh = async () => { if (token === routeToken) route(); };
   bindRunButtons(refresh);
-  poll(async () => { const d = await api("GET", "/jobs"); if (token === routeToken && $(".ledger")) { $(".ledger").outerHTML = jobLedger(d.jobs); bindRunButtons(refresh); } }, 8000);
+  poll(async () => {
+    const [d, z] = await Promise.all([api("GET", "/jobs"), api("GET", "/sizes")]);
+    if (token === routeToken && $(".ledger")) { $(".ledger").outerHTML = jobLedger(d.jobs, z.sizes); bindRunButtons(refresh); }
+  }, 8000);
 }
 
 function runsTable(items, showJob) {
@@ -401,6 +467,8 @@ async function viewJobDetail(id, token) {
       <div class="panel"><h2>Recent runs</h2><div id="runs" class="tablewrap"><div class="loading">Loading…</div></div></div>
       <div class="panel"><h2>Snapshots on the server</h2><div id="snaps"><div class="loading">Asking the server…</div></div></div>
     </div>
+    <div class="stack">
+    <div class="panel"><h2>Size</h2><div id="jsize"><div class="loading">Loading…</div></div></div>
     <div class="panel"><h2>Details</h2><dl class="kv">
       <dt>Client</dt><dd><a href="#/clients/${esc(j.client_id)}">${esc(j.client_name)}</a></dd>
       <dt>Destinations</dt><dd>${j.destination_names.map(esc).join("<br>") || `<span class="bad-text">None</span>`}</dd>
@@ -411,10 +479,32 @@ async function viewJobDetail(id, token) {
       <dt>Change detection</dt><dd>${esc({metadata: "Metadata (fastest)", data: "Data", legacy: "Legacy"}[j.change_detection])}</dd>
       <dt>Speed limit</dt><dd>${j.rate ? esc(j.rate) + "/s" : `<span class="muted">None</span>`}</dd>
       <dt>Encryption</dt><dd>${j.keyfile ? `<span class="mono">${esc(j.keyfile)}</span>` : `<span class="muted">Not encrypted by this job</span>`}</dd>
-    </dl></div></div>`);
+    </dl></div></div></div>`);
+  const drawSize = sz => {
+    const js = sz.jobs[id];
+    if (!js) return;
+    const folders = js.folder_bytes == null
+      ? `<span class="muted">${js.measuring ? "Measuring now. Large folders can take a while." : "Not measured yet."}</span>`
+      : `<b>${esc(jobSize(js))}</b> <span class="sub">measured ${esc(ago(js.folder_measured))}${js.measuring ? ", measuring again now" : ""}</span>`;
+    const rows = j.destinations.map((did, i) => {
+      const l = js.backups[did], name = j.destination_names[i] || did;
+      const v = !l ? `<span class="muted">Not checked yet</span>` : l.error ? `<span class="bad-text">${esc(l.error)}</span>`
+        : !l.count ? `<span class="muted">No backups yet</span>` : `${esc(bytes(l.bytes))} <span class="sub">from ${esc(fmtTime(l.time))}</span>`;
+      return `<dt>${esc(name)}</dt><dd>${v}</dd>`;
+    }).join("");
+    $("#jsize").innerHTML = `<dl class="kv"><dt>Folders</dt><dd>${folders}${js.folder_errors.map(e => `<div class="sub bad-text">${esc(e)}</div>`).join("")}</dd>
+      ${rows}</dl>
+      <p class="hint">Backup sizes are the newest snapshot as PBS counts it, before deduplication. Unchanged data is only stored once, so it takes less room.</p>
+      <div class="btnrow"><button class="btn small" data-measure="${esc(j.client_id)}">Measure again</button><button class="btn small" data-checkspace="">Check backups now</button></div>`;
+    bindSizeButtons(() => api("GET", "/sizes").then(r => { if (token === routeToken) drawSize(r.sizes); }), id);
+  };
+  let lastSizes = "";
   const drawRuns = async () => {
-    const [{runs}, {job}] = await Promise.all([api("GET", `/runs?job=${id}&limit=25`), api("GET", `/jobs/${id}`)]);
+    const [{runs}, {job}, {sizes}] = await Promise.all([api("GET", `/runs?job=${id}&limit=25`), api("GET", `/jobs/${id}`), api("GET", "/sizes")]);
     if (token !== routeToken) return;
+    // Only redraw sizes when they change, so the buttons don't flicker.
+    const key = JSON.stringify(sizes.jobs[id] || null);
+    if (key !== lastSizes) { lastSizes = key; drawSize(sizes); }
     $("#runs").innerHTML = runsTable(runs, false);
     $("#j-run").innerHTML = runButton(job).replace("btn small", "btn primary");
     bindRowLinks();
@@ -569,12 +659,12 @@ function usageHtml(u) {
   if (!u || u.total == null) return `<div class="result ok">Connected. The datastore answered.</div>`;
   const pct = u.total ? Math.round(u.used / u.total * 100) : 0;
   return `<div class="result ok">Connected. ${bytes(u.used)} of ${bytes(u.total)} used (${pct}%), ${bytes(u.avail)} free.</div>
-    <div class="meter ${pct >= 90 ? "bad" : pct >= 80 ? "warn" : ""}" data-pct="${pct}"><i></i></div>`;
+    <div class="meter ${spaceClass(pct)}" data-pct="${pct}"><i></i></div>`;
 }
 function sizeMeters(root) { $$(".meter[data-pct]", root).forEach(m => { $("i", m).style.width = Math.min(100, +m.dataset.pct) + "%"; }); }
 
 async function viewDestinations(token) {
-  const {destinations} = await api("GET", "/destinations");
+  const [{destinations}, {sizes}] = await Promise.all([api("GET", "/destinations"), api("GET", "/sizes")]);
   if (token !== routeToken) return;
   render(`<div class="pagehead"><div><h1>Destinations</h1><p class="lede">The Proxmox Backup Server datastores jobs send backups to, with the credentials clients use to reach them.</p></div>
     <a class="btn primary" href="#/destinations/new">Add a destination</a></div>
@@ -582,12 +672,14 @@ async function viewDestinations(token) {
       <div><h3><a class="jobname" href="#/destinations/${esc(d.id)}">${esc(d.name)}</a></h3><div class="sub mono">${esc(d.repository)}${d.namespace ? " · namespace " + esc(d.namespace) : ""}</div>
         <div class="sub">${d.used_by.length ? `Used by ${esc(d.used_by.join(", "))}` : "Not used by any job"}${d.fingerprint ? "" : ", no fingerprint saved"}</div></div>
       <div class="btnrow"><button class="btn small" data-check="${esc(d.id)}">Check connection</button><a class="btn small" href="#/destinations/${esc(d.id)}">Edit</a></div></div>
-      <div id="u-${esc(d.id)}"></div></div>`).join("")}</div>`
+      <div class="mt-12">${spaceHtml(sizes.destinations[d.id], d.name)}${sizes.destinations[d.id] && sizes.destinations[d.id].checked ? `<div class="sub">Checked ${esc(ago(sizes.destinations[d.id].checked))}</div>` : ""}</div>
+      <div id="u-${esc(d.id)}" class="mt-12"></div></div>`).join("")}</div>`
       : `<div class="panel empty"><h2>No destinations yet</h2><p>Add the PBS server and datastore to back up to, with an API token for it. For one token per client, add a destination per client pointing at the same datastore.</p><a class="btn primary" href="#/destinations/new">Add a destination</a></div>`}`);
+  sizeMeters($("#view"));
   $$("[data-check]").forEach(b => b.addEventListener("click", async () => {
     const d = destinations.find(x => x.id === b.dataset.check), box = $(`#u-${d.id}`);
     b.disabled = true; box.innerHTML = `<div class="result info">Connecting…</div>`;
-    try { box.innerHTML = usageHtml((await api("POST", "/destinations/test", {...d, secret: ""})).usage); sizeMeters(box); }
+    try { box.innerHTML = usageHtml((await api("POST", "/destinations/test", {...d, secret: ""})).usage); sizeMeters(box); api("POST", "/sizes/check", {destination: d.id}).catch(() => {}); }
     catch (ex) { box.innerHTML = `<div class="result bad">${esc(ex.message)}</div>`; }
     finally { b.disabled = false; }
   }));
@@ -974,7 +1066,8 @@ async function viewClient(id, token) {
 }
 
 /* ---------- alerts ---------- */
-const ALERT_KIND = {failed: "Backup failed", succeeded: "Backup succeeded", missed: "Backup didn't run", unreachable: "Can't reach client", reachable: "Client back"};
+const ALERT_KIND = {failed: "Backup failed", succeeded: "Backup succeeded", missed: "Backup didn't run", unreachable: "Can't reach client", reachable: "Client back",
+  full: "Destination nearly full", space_ok: "Destination has room"};
 
 async function viewAlerts(token) {
   const [{settings: a, password_set}, {alerts}] = await Promise.all([api("GET", "/alerts/settings"), api("GET", "/alerts?limit=50")]);
@@ -989,6 +1082,7 @@ async function viewAlerts(token) {
           ${check("on_failure", "When a backup fails", "Including backups interrupted by a restart, with the reason and the end of the log.")}
           ${check("on_missed", "When a scheduled backup doesn't run", "Checked once the server has heard from the client after the scheduled time.")}
           ${check("on_unreachable", "When a client can't be reached", "And again when it's back.")}
+          ${check("on_full", "When a destination is nearly full", "Before backups to it start failing. And again once there's room.")}
           ${check("on_success", "When a backup succeeds", "Usually more email than you want; failures and missed backups are the ones to watch.")}
         </div>
         <div class="formgrid top">
@@ -996,6 +1090,8 @@ async function viewAlerts(token) {
             <small>How long past its scheduled time a backup may start before it counts as missed.</small></div>
           <div class="field"><label for="a-unreach"><span>Report a client after</span></label><div class="unit"><input type="number" id="a-unreach" name="unreachable_minutes" value="${esc(a.unreachable_minutes)}" min="5" max="10080"><span class="muted small">minutes unreachable</span></div>
             <small>Short network blips don't send email.</small></div>
+          <div class="field"><label for="a-full"><span>Call a destination nearly full at</span></label><div class="unit"><input type="number" id="a-full" name="full_percent" value="${esc(a.full_percent)}" min="50" max="99"><span class="muted small">% used</span></div>
+            <small>Space is checked every 15 minutes by default (see Settings).</small></div>
         </div>
       </fieldset>
       <fieldset class="section"><legend>Recipients</legend>
@@ -1026,7 +1122,7 @@ async function viewAlerts(token) {
       </tbody></table></div>` : `<p class="muted">No alerts yet.</p>`}</div>`);
   const f = $("#aform"), out = $("#a-result");
   const read = () => ({enabled: f.enabled.checked, on_failure: f.on_failure.checked, on_success: f.on_success.checked, on_missed: f.on_missed.checked,
-    on_unreachable: f.on_unreachable.checked, missed_grace_minutes: Number(f.missed_grace_minutes.value) || 0, unreachable_minutes: Number(f.unreachable_minutes.value) || 0,
+    on_unreachable: f.on_unreachable.checked, on_full: f.on_full.checked, full_percent: Number(f.full_percent.value) || 0, missed_grace_minutes: Number(f.missed_grace_minutes.value) || 0, unreachable_minutes: Number(f.unreachable_minutes.value) || 0,
     to: f.to.value, from: f.from.value, host: f.host.value, port: Number(f.port.value) || 0, security: f.security.value, username: f.username.value, password: f.password.value});
   f.security.addEventListener("change", () => { if ([25, 465, 587].includes(+f.port.value)) f.port.value = {starttls: 587, ssl: 465, none: 25}[f.security.value]; });
   f.addEventListener("submit", async e => {

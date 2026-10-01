@@ -68,6 +68,7 @@ func (s *Server) saveDestination(r *http.Request, existing *store.Destination) (
 		return nil, backupError(err)
 	}
 	s.applyForDestination(d.ID)
+	s.sizes.Request("dest:"+d.ID, "backup:*")
 	return map[string]any{"destination": s.destView(d)}, nil
 }
 
@@ -109,6 +110,7 @@ func (s *Server) apiDestinationDelete(w http.ResponseWriter, r *http.Request) (a
 		}
 		return nil, conflict("Still used by: %s. Change those jobs to use another destination first.", strings.Join(names, ", "))
 	}
+	_ = s.store.DeleteSize(backups.SizeDest, r.PathValue("id"))
 	return map[string]any{"ok": true}, s.store.DeleteDestination(r.PathValue("id"))
 }
 
@@ -257,6 +259,7 @@ func (s *Server) saveJob(r *http.Request, existing *store.Job) (any, error) {
 		return nil, err
 	}
 	s.clients.ApplyAsync(c.ID)
+	s.sizes.Request("backup:" + j.ID)
 	return map[string]any{"job": s.jobView(j, cm, dm)}, nil
 }
 

@@ -21,8 +21,8 @@ The full plan is in [docs/design-v2.md](docs/design-v2.md).
 | M2: clients over SSH: add as root once, automatic `proxmox-backup-client` install, limited `pbcm` account, host key pinning, folder browser, repair and remove | **Done** |
 | M3a: backups: destinations, jobs with several destinations, schedules on each client, Run now, cancel, live logs, run history, snapshots | **Done** |
 | M3b: email alerts for failed and missed backups and unreachable clients, client time zones | **Done** |
-| M4: dashboard: data protected, destination space (and nearly-full alerts) | Next |
-| M5: updates from the browser | |
+| M4: dashboard: data protected, destination space (and nearly-full alerts) | **Done** |
+| M5: updates from the browser | Next |
 | M6: moving from 1.x, docs, 2.0.0 release | |
 
 ## Trying the development version
