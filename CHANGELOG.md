@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Run now on a paused job.** The button was faded with the rest of the row, so it looked disabled, yet it still started a backup. A paused job now can't run at all: Run now is disabled, with a tooltip saying why, and the server refuses it too. Only the paused job's run history and next run are faded. ([#11](https://github.com/bradyloveland/pbcmanager/issues/11))
+
 ## [2.0.0] - 2026-10-01
 
 Version 2: a rewrite in Go, renamed PBC Manager. One central server now manages backups on many clients over SSH; each client runs its own schedules and backs up straight to Proxmox Backup Server. To move from 1.x, see docs/guide/moving-from-1x.md.
