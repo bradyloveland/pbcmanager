@@ -238,6 +238,16 @@ details.adv[open] > summary{margin-bottom:16px}
 .warn-text{color:var(--warn)}
 .notes{white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.5;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px 14px;max-height:340px;overflow:auto}
 .mt-8{margin-top:8px}
+.nowrap{white-space:nowrap}
+.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.importbox{border-top:1px solid var(--line);padding-top:16px}
+.importbox h3{margin:0 0 4px}
+.importbox h4{margin-bottom:6px}
+.implist{list-style:none;margin:0;padding:0}
+.implist li{padding:10px 0;border-bottom:1px solid var(--line)}
+.implist li:last-child{border-bottom:0}
+.implist .sub{display:inline}
+.implist div.sub{display:block}
 .pill.idle{background:var(--surface-2);color:var(--muted)}
 
 /* Live log */

@@ -454,8 +454,8 @@ function runsTable(items, showJob) {
     ${items.map(({run: r, client_name}) => `<tr class="clickable" data-href="#/activity/${esc(r.client_id)}/${esc(r.id)}">
       <td>${runPill(r.status)}</td>${showJob ? `<td><a class="jobname" href="#/activity/${esc(r.client_id)}/${esc(r.id)}">${esc(r.job_name)}</a><div class="sub">${esc(client_name)}, ${r.trigger === "manual" ? "started by hand" : "scheduled"}</div></td>` : ""}
       <td class="small">${esc(r.destination_name)}</td>
-      <td class="small">${esc(fmtTime(r.started))}</td>
-      <td class="small">${esc(dur(r.started, r.ended || null))}</td>
+      <td class="small nowrap">${esc(fmtTime(r.started))}</td>
+      <td class="small nowrap">${esc(dur(r.started, r.ended || null))}</td>
       <td><div class="summary">${esc(r.summary || (r.status === "running" ? "In progress" : ""))}</div></td></tr>`).join("")}
   </tbody></table>`;
 }
@@ -1326,6 +1326,11 @@ async function viewSettings(token) {
     <div class="panel"><h2>SSH</h2><p class="hint m-0 mb-14">The key this server signs in to clients with. Setup adds it to each client's pbcm account automatically; you only need it here if you'd rather add it for root by hand before adding a client.</p>
       <dl class="kv"><dt>Public key</dt><dd><div class="keybox">${esc(ssh.public_key)}</div><button class="btn small mt-12" id="copy-key">Copy</button></dd>
       <dt>Fingerprint</dt><dd class="mono">${esc(ssh.fingerprint)}</dd></dl></div>
+    <div class="panel"><h2>Export and import</h2>
+      <p class="hint m-0 mb-14">Download this server's destinations, jobs, alert settings and Settings page values, or import them on another server. You can also import settings from PBS Backup Manager 1.x. Exports never include passwords or token secrets.</p>
+      <div class="btnrow"><button class="btn" id="exp-btn">Download settings</button>
+        <label class="btn" for="imp-file">Import a settings file…</label><input type="file" id="imp-file" class="visually-hidden" accept=".json,application/json"></div>
+      <div id="imp-box"></div></div>
     <div class="panel"><h2>About</h2><dl class="kv">
       <dt>Version</dt><dd>${esc(session.version)}</dd>
       <dt>Project</dt><dd><a href="https://github.com/bradyloveland/pbcmanager" rel="noopener noreferrer" target="_blank">github.com/bradyloveland/pbcmanager</a></dd>
@@ -1354,6 +1359,107 @@ async function viewSettings(token) {
     finally { btn.disabled = false; }
   });
   drawNetwork(n, token);
+  wireImport(token);
+}
+
+/* ---------- export and import ---------- */
+const IMPORT_KIND = {"1.x-export": "a PBS Backup Manager 1.x settings export", "1.x-config": "a PBS Backup Manager 1.x config.json",
+  "pbcm-export": "a PBC Manager settings export"};
+
+function wireImport(token) {
+  $("#exp-btn").onclick = async e => {
+    e.target.disabled = true;
+    try {
+      const res = await fetch("api/settings/export", {credentials: "same-origin"});
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `The server returned ${res.status}.`);
+      const name = (res.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/)?.[1] || "pbcm-settings.json";
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url; a.download = name; document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (ex) { toast(ex.message, "bad"); }
+    finally { e.target.disabled = false; }
+  };
+  const input = $("#imp-file"), box = $("#imp-box");
+  input.onchange = async () => {
+    const f = input.files[0];
+    input.value = "";
+    if (!f) return;
+    let file;
+    try { file = JSON.parse(await f.text()); }
+    catch (_) { box.innerHTML = `<div class="result bad mt-12">That file isn't a settings file (it isn't JSON).</div>`; return; }
+    const {clients} = await api("GET", "/clients");
+    if (token !== routeToken) return;
+    startImport(box, file, f.name, clients, token);
+  };
+}
+
+function startImport(box, file, fileName, clients, token) {
+  const opts = {client_id: clients.length === 1 ? clients[0].id : "", secrets: {}, keyfile_passwords: {}, alert_password: "",
+    import_alerts: true, import_settings: true, enable_schedules: false};
+  const read = () => {
+    const f = $("#imp-form", box);
+    if (!f) return;
+    if (f.client_id) opts.client_id = f.client_id.value;
+    $$("[data-secret]", f).forEach(i => { opts.secrets[i.dataset.secret] = i.value; });
+    $$("[data-keypw]", f).forEach(i => { opts.keyfile_passwords[i.dataset.keypw] = i.value; });
+    if (f.alert_password) opts.alert_password = f.alert_password.value;
+    for (const k of ["import_alerts", "import_settings", "enable_schedules"]) if (f[k]) opts[k] = f[k].checked;
+  };
+  const draw = (p, msg) => {
+    const kind = IMPORT_KIND[p.kind] || "a settings file";
+    const from = [p.version && `version ${p.version}`, p.from && `from ${p.from}`].filter(Boolean).join(", ");
+    const destRows = p.destinations.map(d => `<li><b>${esc(d.name)}</b> <span class="sub mono">${esc(d.repository)}</span>
+      ${d.existing ? `<div class="sub">Already here as “${esc(d.existing)}”; that one is used.</div>`
+        : d.secret_included ? `<div class="sub ok-text">Token secret included.</div>`
+        : `<label class="field mt-8"><span>Token secret (or password)</span><input type="password" autocomplete="off" data-secret="${esc(d.key)}" value="${esc(opts.secrets[d.key] || "")}"></label>`}</li>`).join("");
+    const jobRows = p.jobs.map(j => `<li><b>${esc(j.name)}</b>${j.name !== j.old_name ? ` <span class="sub">(renamed from “${esc(j.old_name)}”, which is taken)</span>` : ""}
+      <span class="sub">${j.client ? `on ${esc(j.client)} · ` : ""}${plural(j.folders, "folder")}</span>
+      ${j.skip ? `<div class="sub warn-text">Not imported: ${esc(j.skip)}</div>` : ""}
+      ${!j.skip && j.keyfile_password === "needed" ? `<label class="field mt-8"><span>Password for its encryption key file (if it has one)</span><input type="password" autocomplete="off" data-keypw="${esc(j.key)}" value="${esc(opts.keyfile_passwords[j.key] || "")}"></label>` : ""}</li>`).join("");
+    box.innerHTML = `<form id="imp-form" class="importbox mt-16" novalidate>
+      <h3>Importing ${esc(fileName)}</h3>
+      <p class="sub">This is ${esc(kind)}${from ? ` (${esc(from)})` : ""}.${p.kind === "1.x-config" ? " It holds passwords; it's only read, and not kept on this server." : ""}</p>
+      ${p.needs_client ? `<label class="field mt-12"><span>Which client do these backups belong to?</span>
+        <select name="client_id"><option value="">Choose the machine 1.x ran on…</option>${clients.map(c => `<option value="${esc(c.id)}" ${c.id === opts.client_id ? "selected" : ""}>${esc(c.name)} (${esc(c.address)})</option>`).join("")}</select>
+        <small>1.x backed up one machine. Add it as a client first if it isn't listed.</small></label>` : ""}
+      ${p.destinations.length ? `<h4 class="mt-16">Destinations</h4><ul class="implist">${destRows}</ul>` : ""}
+      ${p.jobs.length ? `<h4 class="mt-16">Backup jobs</h4><ul class="implist">${jobRows}</ul>` : `<p class="muted">No backup jobs in this file.</p>`}
+      <div class="choice">
+        ${p.alerts ? `<label class="check"><input type="checkbox" name="import_alerts" ${opts.import_alerts ? "checked" : ""}><span><b>Import email alert settings</b><br><span class="hint">Mail server ${esc(p.alerts.host || "—")}, sending to ${esc(p.alerts.to || "—")}. Replaces the current alert settings.</span></span></label>
+          ${p.alerts.password_needed && opts.import_alerts ? `<label class="field"><span>Mail server password</span><input type="password" name="alert_password" autocomplete="off" value="${esc(opts.alert_password)}"><small>Not in the file. Leave blank to enter it later on the Alerts page.</small></label>` : ""}` : ""}
+        ${p.settings.length ? `<label class="check"><input type="checkbox" name="import_settings" ${opts.import_settings ? "checked" : ""}><span><b>Import settings</b><br><span class="hint">${esc(p.settings.join(", "))}</span></span></label>` : ""}
+        ${p.jobs.some(j => !j.skip) ? `<label class="check"><input type="checkbox" name="enable_schedules" ${opts.enable_schedules ? "checked" : ""}><span><b>Turn the jobs' schedules on now</b><br><span class="hint">Leave this off until the old server's schedules are stopped, or both will back up the same folders. You can turn each job on later by editing it.</span></span></label>` : ""}
+      </div>
+      ${p.problems.length ? `<div class="result bad"><b>Before importing:</b><ul class="m-0">${p.problems.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
+      ${msg || ""}
+      <div class="btnrow mt-12"><button class="btn primary" type="submit">Import</button><button class="btn" type="button" id="imp-cancel">Cancel</button></div>
+    </form>`;
+    const f = $("#imp-form", box);
+    f.addEventListener("change", e => { if (e.target.name === "client_id" || e.target.type === "checkbox") { read(); preview(); } });
+    $("#imp-cancel", box).onclick = () => { box.innerHTML = ""; };
+    f.addEventListener("submit", async e => {
+      e.preventDefault(); read();
+      const btn = $("button[type=submit]", f); btn.disabled = true;
+      try {
+        const r = await api("POST", "/settings/import", {file, ...opts});
+        if (!r.imported) { draw(r.plan); return; }
+        const parts = [r.result.destinations && plural(r.result.destinations, "destination"), r.result.jobs && plural(r.result.jobs, "job")].filter(Boolean);
+        box.innerHTML = `<div class="result ok mt-12">Imported ${esc(parts.join(" and ") || "the settings")}.${r.result.jobs && !opts.enable_schedules ? " The jobs' schedules are off; turn them on once the old server is stopped." : ""} <a href="#/jobs">See the jobs</a></div>`;
+      } catch (ex) { draw(lastPlan, `<div class="result bad">${esc(ex.message)}</div>`); }
+    });
+  };
+  let lastPlan = null;
+  const preview = async () => {
+    try {
+      const r = await api("POST", "/settings/import/preview", {file, ...opts});
+      if (token !== routeToken) return;
+      lastPlan = r.plan;
+      draw(r.plan);
+    } catch (ex) { box.innerHTML = `<div class="result bad mt-12">${esc(ex.message)}</div>`; }
+  };
+  box.innerHTML = `<div class="result info mt-12">Reading ${esc(fileName)}…</div>`;
+  preview();
 }
 
 const TLS_LABEL = {"self-signed": "HTTPS with a self-signed certificate", custom: "HTTPS with your own certificate", off: "Off: plain HTTP"};

@@ -1,59 +1,76 @@
 # PBC Manager
 
-A self-hosted web UI for file-level backups with `proxmox-backup-client`. One central server manages backups on many Linux machines over SSH, each sending its data straight to one or more Proxmox Backup Server destinations.
+A self-hosted web UI for file-level backups with `proxmox-backup-client`. One central server manages backups on many Linux machines over SSH. Each machine sends its data straight to one or more Proxmox Backup Server datastores.
 
-> **Version 2 is in development** on this branch (`v2`). It's a rewrite in Go and isn't ready for use yet. The working single-machine version, 1.2.0, is on [`main`](https://github.com/bradyloveland/pbcmanager/tree/main) and in [Releases](https://github.com/bradyloveland/pbcmanager/releases/tag/v1.2.0).
+![The Dashboard: data protected, destination space, and each job's last 20 runs](docs/screenshots/dashboard.jpg)
 
-## How version 2 works
+## How it works
 
-- **Clients never depend on the server.** Each client keeps its own schedule and credentials under systemd and backs up straight to PBS. If the server is down, backups still run, and the server catches up on results when it's back.
-- **Set up over SSH.** The server connects to a client as root once, installs `proxmox-backup-client` if it's missing, and creates a limited `pbcm` account for everything after that.
-- **Many clients and destinations.** A job can back up to more than one PBS destination.
-- **Everything in the browser.** Setup, every setting and updates happen in the web UI. Only the first install, and the recovery commands for when you're locked out, need a terminal.
+- **Clients never depend on the server.** Each client keeps its own schedules, as systemd timers, and its own credentials, and backs up straight to PBS. If the server is down, backups still run, and the server catches up on the results when it's back.
+- **Set up over SSH, no agent.** The server signs in to a client once as root, or as a sudo user. It installs `proxmox-backup-client` if it's missing and creates a limited `pbcm` account that can only run PBC Manager's helper.
+- **Many clients and destinations.** A job backs up a client's folders to one or more PBS datastores, with its own schedule, exclusions, speed limit and encryption key.
+- **Everything in the browser:** setup, every setting, updates, and moving over from 1.x. Only the first install, and the recovery commands for when you're locked out, need a terminal.
 
-The full plan is in [docs/design-v2.md](docs/design-v2.md).
+![A job: recent runs, sizes, and its settings](docs/screenshots/job.jpg)
 
-## Progress
+## Features
 
-| Milestone | State |
-| --- | --- |
-| M1: server base: sign-in with two-step verification, setup in the browser, Settings page (including network and HTTPS with confirm-or-undo), installer, CI | **Done** |
-| M2: clients over SSH: add as root once, automatic `proxmox-backup-client` install, limited `pbcm` account, host key pinning, folder browser, repair and remove | **Done** |
-| M3a: backups: destinations, jobs with several destinations, schedules on each client, Run now, cancel, live logs, run history, snapshots | **Done** |
-| M3b: email alerts for failed and missed backups and unreachable clients, client time zones | **Done** |
-| M4: dashboard: data protected, destination space (and nearly-full alerts) | **Done** |
-| M5: updates from the browser | **Done** |
-| M6: moving from 1.x, docs, 2.0.0 release | Next |
+- **Dashboard:**
+  - the health of every job, with its last 20 runs
+  - how much data is protected
+  - how full each datastore is
+- **Backup jobs:**
+  - several folders per job, chosen with a folder browser on the client
+  - exclusions, change detection mode, speed limit, encryption key file
+  - schedules: daily on chosen days, every few hours, or only by hand
+- **Run now, cancel, live logs,** run history across all clients, and snapshot lists from PBS.
+- **Email alerts** when a backup fails, a scheduled backup doesn't run, a client can't be reached, or a datastore is nearly full.
+- **Updates from the web UI:**
+  - signed releases, checked before installing
+  - automatic rollback if a new version doesn't start
+  - optional automatic installs
+- **Security:**
+  - two-step sign-in with recovery codes
+  - credentials encrypted at rest and never shown again
+  - pinned SSH host keys
+  - HTTPS with a self-signed certificate or your own
 
-## Trying the development version
+## Requirements
 
-The server runs on Debian 12 or 13 (an LXC container works well) on x86-64 or ARM64. Build a package and install it:
+- **Server:** Debian 12 or 13 on x86-64 or ARM64. A small LXC container on Proxmox VE works well.
+- **Clients:**
+  - Debian 12 or 13, or a system based on them, on x86-64. That includes Proxmox VE, OpenMediaVault and Ubuntu.
+  - Reachable over SSH from the server, on your LAN or a VPN.
+- **Proxmox Backup Server** with an API token for each client.
+
+## Install
+
+On the server, as root:
 
 ```bash
-make dist                      # on a machine with Go 1.26+
-scp dist/pbcm-*-linux-amd64.tar.gz root@your-lxc:
+apt-get update && apt-get install -y curl
+curl -fsSLO https://raw.githubusercontent.com/bradyloveland/pbcmanager/main/install.sh
+bash install.sh
 ```
 
-On the server:
+It prints the web address and a one-time **setup code**. Open the address, enter the code and create the admin account.
 
-```bash
-tar xzf pbcm-*-linux-amd64.tar.gz && cd pbcm-*-linux-amd64
-sudo ./install.sh
-```
+## Documentation
 
-The installer prints the address and a one-time **setup code**. Open the address and enter the code to create the admin account. Run `sudo ./install.sh --help` for options such as `--behind-proxy`. Everything they set can also be changed later under Settings.
+- [Installing the server](docs/guide/install.md), including an LXC recipe and the installer's options
+- [Setting up Proxmox Backup Server](docs/guide/pbs.md): users, API tokens and permissions
+- [Clients](docs/guide/clients.md): adding, repairing and removing them
+- [Updates](docs/guide/updates.md)
+- [Moving from PBS Backup Manager 1.x](docs/guide/moving-from-1x.md)
+- [Troubleshooting](docs/guide/troubleshooting.md), including the recovery commands
 
-If you're locked out:
+## Version 1.x
 
-```bash
-sudo pbcm passwd            # set a new password
-sudo pbcm totp-reset        # turn off two-step verification
-sudo pbcm network --reset   # every interface, port 8099, self-signed HTTPS
-```
+PBS Backup Manager 1.x ran on the one machine it backed up. Its last release, [1.2.0](https://github.com/bradyloveland/pbcmanager/releases/tag/v1.2.0), stays available. Version 2 can import its settings: see [Moving from 1.x](docs/guide/moving-from-1x.md).
 
 ## Development
 
-See [docs/development.md](docs/development.md).
+See [docs/development.md](docs/development.md) and the design in [docs/design-v2.md](docs/design-v2.md).
 
 ## License
 

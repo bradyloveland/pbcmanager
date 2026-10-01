@@ -63,7 +63,16 @@ Version 2: a rewrite in Go, renamed PBC Manager. Work in progress; see docs/desi
   - **Client runners:** after the server updates, each client gets the matching `pbcm-runner`, and checks its signature before replacing itself. The Updates page shows each client's version.
 - `pbcm rollback` puts back the previous version from a terminal, when the service is stopped.
 
+- **Export and import** (milestone 6) under Settings:
+  - **Download settings:** destinations, jobs, alert settings and Settings page values. Passwords and token secrets are never included.
+  - **Import from PBS Backup Manager 1.x:** from its settings export, or from its `config.json` with the credentials. Choose the client it ran on and see a preview first; missing secrets are asked for in the form.
+  - **Import a PBC Manager export** on another server; jobs are matched to clients by address.
+  - **Safe to repeat:** matching destinations are reused, jobs already there are skipped, and taken names are renamed.
+  - **Imported jobs start paused,** so the old and new servers don't both back up the same folders.
+- **User guide** in `docs/guide/`: installing (with an LXC recipe), setting up PBS tokens, clients, updates, moving from 1.x, and troubleshooting. A new README with screenshots.
+
 ### Fixed
+- Times in the Recent runs table no longer wrap onto several lines.
 - Removing a client deleted its `pbcm` account up to a minute later than intended, because systemd timers fire late by default. It's now removed within a few seconds.
 - **New setting, "Web address of this server",** so alert emails link to the run.
 
