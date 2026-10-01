@@ -418,6 +418,7 @@ func Uninstall(env *Env, keepHistory bool) error {
 	}
 	script += "; rmdir /etc/pbcm 2>/dev/null; true"
 	if _, err := env.Exec("systemd-run", "--quiet", "--collect", "--unit=pbcm-remove-account", "--on-active=2",
+		"--timer-property=AccuracySec=1s", // timers may otherwise fire up to a minute late
 		"/bin/sh", "-c", script); err != nil {
 		say("Remove the %s account by hand when convenient: userdel %s", Account, Account)
 		return nil

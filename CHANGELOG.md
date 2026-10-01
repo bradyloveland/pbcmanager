@@ -52,6 +52,9 @@ Version 2: a rewrite in Go, renamed PBC Manager. Work in progress; see docs/desi
   - **Sizes per job:** each job shows its size, and its page shows the folders' size and the newest backup on each destination.
   - **Destination nearly full** email alert, at a percentage you choose (90% by default), and another email when there's room again.
   - **New settings** for how often space, backup sizes and folder sizes are checked.
+
+### Fixed
+- Removing a client deleted its `pbcm` account up to a minute later than intended, because systemd timers fire late by default. It's now removed within a few seconds.
 - **New setting, "Web address of this server",** so alert emails link to the run.
 
 ### Changed
