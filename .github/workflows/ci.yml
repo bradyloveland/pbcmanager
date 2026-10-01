@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main, v2]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Formatting
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - name: Vet
+        run: go vet ./...
+      - name: Staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+      - name: Tests
+        run: go test -race ./...
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck -x install.sh uninstall.sh scripts/*.sh
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build release archives
+        run: make dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  install:
+    # Installs the real package with systemd, checks it serves, upgrades it in
+    # place and removes it again.
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Unpack
+        run: |
+          cd dist && sha256sum -c SHA256SUMS
+          tar -xzf pbcwm-*-linux-amd64.tar.gz
+      - name: Install
+        run: |
+          cd dist/pbcwm-*-linux-amd64
+          sudo ./install.sh --skip-client | tee install.log
+          grep -q "Setup code:" install.log
+      - name: Serves HTTPS and asks for setup
+        run: |
+          curl -fsk https://127.0.0.1:8099/api/health
+          curl -fsk https://127.0.0.1:8099/api/session | grep -q '"setup_needed":true'
+          code=$(sudo pbcwm setup-code)
+          curl -fsk https://127.0.0.1:8099/api/setup -H 'X-PBCWM: 1' -H 'Content-Type: application/json' \
+            -d "{\"code\":\"$code\",\"username\":\"admin\",\"password\":\"ci-password-123\"}" | grep -q '"user":"admin"'
+          systemctl show -p User --value pbcwm | grep -qx pbcwm
+          test "$(sudo stat -c %U /var/lib/pbcwm/pbcwm.db)" = pbcwm
+      - name: Upgrade in place keeps settings
+        run: |
+          cd dist/pbcwm-*-linux-amd64
+          sudo ./install.sh --skip-client --port 9443 | tee upgrade.log
+          if grep -q "Setup code:" upgrade.log; then echo "setup code shown again after setup"; exit 1; fi
+          curl -fsk https://127.0.0.1:9443/api/session | grep -q '"setup_needed":false'
+      - name: Uninstall
+        run: |
+          cd dist/pbcwm-*-linux-amd64
+          sudo ./uninstall.sh --purge
+          if systemctl is-active --quiet pbcwm; then echo "service still running"; exit 1; fi
+          if id pbcwm 2>/dev/null; then echo "account still there"; exit 1; fi
+          test ! -e /var/lib/pbcwm
+          test ! -e /opt/pbcwm
+      - name: Service log
+        if: failure()
+        run: sudo journalctl -u pbcwm --no-pager -n 100

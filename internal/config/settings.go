@@ -1,0 +1,109 @@
+// Package config defines every user-changeable setting: what it's called on
+// the Settings page, its type, limits and default, and how it's checked.
+// Network settings have their own type (see network.go) because changing them
+// needs a confirm-or-revert step.
+package config
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"unicode"
+)
+
+// Def describes one setting.
+type Def struct {
+	Key     string `json:"key"`
+	Group   string `json:"group"`
+	Label   string `json:"label"`
+	Help    string `json:"help,omitempty"`
+	Type    string `json:"type"` // "int", "bool" or "string"
+	Unit    string `json:"unit,omitempty"`
+	Min     int    `json:"min,omitempty"`
+	Max     int    `json:"max,omitempty"`
+	MaxLen  int    `json:"max_len,omitempty"`
+	Default any    `json:"default"`
+	// Placeholder is shown in an empty text box.
+	Placeholder string `json:"placeholder,omitempty"`
+}
+
+// Group is a section of the Settings page.
+type Group struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+}
+
+// Groups lists the Settings page sections in order.
+var Groups = []Group{
+	{"general", "General"},
+	{"security", "Sign-in and sessions"},
+}
+
+// Defs lists every setting. New milestones add theirs here, and the Settings
+// page picks them up automatically.
+var Defs = []Def{
+	{Key: "general.server_name", Group: "general", Label: "Server name",
+		Help: "Shown in the sidebar, in authenticator apps and in alert emails. Leave blank to use this machine's hostname.",
+		Type: "string", MaxLen: 64, Default: ""},
+	{Key: "security.session_hours", Group: "security", Label: "Sign out after inactivity",
+		Help: "How long a signed-in browser stays signed in without being used.",
+		Type: "int", Unit: "hours", Min: 1, Max: 720, Default: 12},
+}
+
+// Lookup returns the definition for key.
+func Lookup(key string) (Def, bool) {
+	for _, d := range Defs {
+		if d.Key == key {
+			return d, true
+		}
+	}
+	return Def{}, false
+}
+
+// ValidationError is shown to the user as-is.
+type ValidationError struct{ Message string }
+
+func (e *ValidationError) Error() string { return e.Message }
+
+func invalid(format string, args ...any) error {
+	return &ValidationError{Message: fmt.Sprintf(format, args...)}
+}
+
+// Clean checks a value from the browser and returns it in its stored form.
+func Clean(key string, raw json.RawMessage) (any, error) {
+	d, ok := Lookup(key)
+	if !ok {
+		return nil, invalid("Unknown setting %q.", key)
+	}
+	switch d.Type {
+	case "int":
+		var n float64
+		if err := json.Unmarshal(raw, &n); err != nil || n != float64(int(n)) {
+			return nil, invalid("%s must be a whole number.", d.Label)
+		}
+		v := int(n)
+		if v < d.Min || v > d.Max {
+			return nil, invalid("%s must be between %d and %d.", d.Label, d.Min, d.Max)
+		}
+		return v, nil
+	case "bool":
+		var b bool
+		if err := json.Unmarshal(raw, &b); err != nil {
+			return nil, invalid("%s must be on or off.", d.Label)
+		}
+		return b, nil
+	default:
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return nil, invalid("%s must be text.", d.Label)
+		}
+		s = strings.TrimSpace(s)
+		if d.MaxLen > 0 && len([]rune(s)) > d.MaxLen {
+			return nil, invalid("%s can be at most %d characters.", d.Label, d.MaxLen)
+		}
+		if strings.IndexFunc(s, unicode.IsControl) >= 0 {
+			return nil, invalid("%s can't contain control characters.", d.Label)
+		}
+		return s, nil
+	}
+}
