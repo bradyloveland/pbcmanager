@@ -64,6 +64,13 @@ func clientView(c *store.Client) map[string]any {
 	return v
 }
 
+func (s *Server) clientViewFull(c *store.Client) map[string]any {
+	v := clientView(c)
+	v["settings_pending"] = s.clients.Pending(c)
+	v["apply_error"] = c.ApplyError
+	return v
+}
+
 func (s *Server) apiClients(w http.ResponseWriter, r *http.Request) (any, error) {
 	list, err := s.store.ListClients()
 	if err != nil {
@@ -71,7 +78,7 @@ func (s *Server) apiClients(w http.ResponseWriter, r *http.Request) (any, error)
 	}
 	out := make([]map[string]any, len(list))
 	for i, c := range list {
-		out[i] = clientView(c)
+		out[i] = s.clientViewFull(c)
 	}
 	return map[string]any{"clients": out}, nil
 }
@@ -81,7 +88,7 @@ func (s *Server) apiClient(w http.ResponseWriter, r *http.Request) (any, error) 
 	if err != nil {
 		return nil, clientError(err)
 	}
-	out := map[string]any{"client": clientView(c)}
+	out := map[string]any{"client": s.clientViewFull(c)}
 	if t := s.clients.LatestTask(c.ID); t != nil {
 		v := t.View(0)
 		out["task"] = map[string]any{"id": v.ID, "kind": v.Kind, "done": v.Done, "ok": v.OK}

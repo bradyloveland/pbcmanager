@@ -36,6 +36,11 @@ type Client struct {
 	ServerHere     bool   `json:"server_here"`
 	LastContact    int64  `json:"last_contact"`
 	CreatedAt      int64  `json:"created_at"`
+	// AppliedHash is the settings bundle the client last reported having.
+	AppliedHash string `json:"applied_hash"`
+	ApplyError  string `json:"apply_error"`
+	// RunCursor is where the next status request starts (unix seconds).
+	RunCursor int64 `json:"run_cursor"`
 }
 
 // ErrNotFound means the record doesn't exist.
@@ -47,14 +52,15 @@ type ErrDuplicate struct{ Field string }
 func (e *ErrDuplicate) Error() string { return "duplicate " + e.Field }
 
 const clientCols = `id, name, address, port, host_key, status, status_detail, offered_key, os_id, os_pretty,
-	os_codename, arch, hostname, systemd_version, client_version, runner_version, server_here, last_contact, created_at`
+	os_codename, arch, hostname, systemd_version, client_version, runner_version, server_here, last_contact, created_at,
+	applied_hash, apply_error, run_cursor`
 
 func scanClient(row interface{ Scan(...any) error }) (*Client, error) {
 	var c Client
 	var here int
 	err := row.Scan(&c.ID, &c.Name, &c.Address, &c.Port, &c.HostKey, &c.Status, &c.StatusDetail, &c.OfferedKey,
 		&c.OSID, &c.OSPretty, &c.OSCodename, &c.Arch, &c.Hostname, &c.SystemdVersion, &c.ClientVersion,
-		&c.RunnerVersion, &here, &c.LastContact, &c.CreatedAt)
+		&c.RunnerVersion, &here, &c.LastContact, &c.CreatedAt, &c.AppliedHash, &c.ApplyError, &c.RunCursor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -79,10 +85,10 @@ func dupError(err error) error {
 // CreateClient inserts a client.
 func (s *Store) CreateClient(c *Client) error {
 	c.CreatedAt = s.Now().Unix()
-	_, err := s.db.Exec(`INSERT INTO clients (`+clientCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err := s.db.Exec(`INSERT INTO clients (`+clientCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		c.ID, c.Name, c.Address, c.Port, c.HostKey, c.Status, c.StatusDetail, c.OfferedKey, c.OSID, c.OSPretty,
 		c.OSCodename, c.Arch, c.Hostname, c.SystemdVersion, c.ClientVersion, c.RunnerVersion, boolInt(c.ServerHere),
-		c.LastContact, c.CreatedAt)
+		c.LastContact, c.CreatedAt, c.AppliedHash, c.ApplyError, c.RunCursor)
 	return dupError(err)
 }
 
@@ -90,9 +96,10 @@ func (s *Store) CreateClient(c *Client) error {
 func (s *Store) SaveClient(c *Client) error {
 	res, err := s.db.Exec(`UPDATE clients SET name=?, address=?, port=?, host_key=?, status=?, status_detail=?,
 		offered_key=?, os_id=?, os_pretty=?, os_codename=?, arch=?, hostname=?, systemd_version=?, client_version=?,
-		runner_version=?, server_here=?, last_contact=? WHERE id=?`,
+		runner_version=?, server_here=?, last_contact=?, applied_hash=?, apply_error=?, run_cursor=? WHERE id=?`,
 		c.Name, c.Address, c.Port, c.HostKey, c.Status, c.StatusDetail, c.OfferedKey, c.OSID, c.OSPretty, c.OSCodename,
-		c.Arch, c.Hostname, c.SystemdVersion, c.ClientVersion, c.RunnerVersion, boolInt(c.ServerHere), c.LastContact, c.ID)
+		c.Arch, c.Hostname, c.SystemdVersion, c.ClientVersion, c.RunnerVersion, boolInt(c.ServerHere), c.LastContact,
+		c.AppliedHash, c.ApplyError, c.RunCursor, c.ID)
 	if err != nil {
 		return dupError(err)
 	}

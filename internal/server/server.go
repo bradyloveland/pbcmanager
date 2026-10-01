@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/bradyloveland/pbcmanager/internal/auth"
+	"github.com/bradyloveland/pbcmanager/internal/backups"
 	"github.com/bradyloveland/pbcmanager/internal/clients"
 	"github.com/bradyloveland/pbcmanager/internal/config"
 	"github.com/bradyloveland/pbcmanager/internal/sshx"
@@ -35,7 +36,9 @@ const (
 // Options configures a Server.
 type Options struct {
 	ConfigDir string
-	Store     *store.Store
+	// DataDir holds run logs collected from clients.
+	DataDir string
+	Store   *store.Store
 	// FailDelay is how long each failed sign-in waits (1 s by default).
 	FailDelay time.Duration
 	// ConfirmWindow is how long a network change waits to be confirmed.
@@ -55,6 +58,8 @@ type Server struct {
 	mux      *http.ServeMux
 	http     *http.Server
 	clients  *clients.Manager
+	pbs      *backups.PBS
+	pollStop context.CancelFunc
 
 	mu         sync.Mutex
 	active     config.Network
@@ -98,6 +103,15 @@ func New(opts Options) (*Server, error) {
 		return nil, fmt.Errorf("server SSH key: %w", err)
 	}
 	s.clients = clients.New(opts.Store, id, opts.RunnerPath)
+	if opts.DataDir == "" {
+		opts.DataDir = opts.ConfigDir
+	}
+	s.opts.DataDir = opts.DataDir
+	s.clients.Sync.LogDir = filepath.Join(opts.DataDir, "logs")
+	s.clients.Sync.KeepRuns = func() int { return s.settingInt("history.client_runs") }
+	s.clients.Sync.KeepDays = func() int { return s.settingInt("history.client_days") }
+	s.clients.Sync.KeepServerRuns = func() int { return s.settingInt("history.server_runs") }
+	s.pbs = &backups.PBS{}
 	s.mux = http.NewServeMux()
 	s.routes()
 	s.http = &http.Server{
@@ -139,6 +153,9 @@ func (s *Server) Start() error {
 		}
 	}
 	go s.housekeeping()
+	ctx, cancel := context.WithCancel(context.Background())
+	s.pollStop = cancel
+	go s.clients.Poll(ctx)
 	return nil
 }
 
@@ -159,6 +176,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	case <-s.stop:
 	default:
 		close(s.stop)
+	}
+	if s.pollStop != nil {
+		s.pollStop()
 	}
 	s.mu.Lock()
 	if s.pending != nil {

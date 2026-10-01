@@ -12,10 +12,13 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
+	"time"
 	"unicode"
 
 	"github.com/bradyloveland/pbcmanager/internal/version"
@@ -37,20 +40,39 @@ const (
 // Env is what commands touch, so tests can point them elsewhere.
 type Env struct {
 	Root   string // prefix for every absolute path ("" on a real client)
+	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
 	// Exec runs a program and returns its combined output.
 	Exec func(name string, args ...string) (string, error)
+	// Run runs a program with input on stdin and returns its stdout; the
+	// error includes stderr.
+	Run func(input, name string, args ...string) (string, error)
+	// ClientBin overrides proxmox-backup-client (tests).
+	ClientBin string
+	Now       func() time.Time
 }
 
 func (e *Env) path(p string) string { return filepath.Join(e.Root, p) }
 
 // DefaultEnv is the real machine.
 func DefaultEnv() *Env {
-	return &Env{Stdout: os.Stdout, Stderr: os.Stderr, Exec: func(name string, args ...string) (string, error) {
-		out, err := exec.Command(name, args...).CombinedOutput()
-		return string(out), err
-	}}
+	return &Env{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
+		Exec: func(name string, args ...string) (string, error) {
+			out, err := exec.Command(name, args...).CombinedOutput()
+			return string(out), err
+		},
+		Run: func(input, name string, args ...string) (string, error) {
+			cmd := exec.Command(name, args...)
+			cmd.Stdin = strings.NewReader(input)
+			var stderr strings.Builder
+			cmd.Stderr = &stderr
+			out, err := cmd.Output()
+			if err != nil {
+				return "", fmt.Errorf("%s: %s", err, strings.TrimSpace(stderr.String()))
+			}
+			return string(out), nil
+		}}
 }
 
 // UsageError means the command line was wrong.
@@ -107,6 +129,40 @@ func Dispatch(env *Env, args []string) error {
 	case "uninstall":
 		keep := len(args) > 1 && args[1] == "--keep-history"
 		return Uninstall(env, keep)
+	case "apply":
+		return Apply(env, env.Stdin)
+	case "run":
+		if len(args) < 2 {
+			return &UsageError{"run needs a job ID"}
+		}
+		cancel := make(chan struct{})
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
+		go func() { <-sigs; close(cancel) }()
+		return RunJob(env, args[1], cancel)
+	case "start", "cancel":
+		if len(args) < 2 {
+			return &UsageError{args[0] + " needs a job ID"}
+		}
+		if args[0] == "start" {
+			return Start(env, args[1])
+		}
+		return Cancel(env, args[1])
+	case "status":
+		var since int64
+		if len(args) > 1 {
+			since = parseInt(args[1])
+		}
+		return StatusSince(env, since)
+	case "log":
+		if len(args) < 2 {
+			return &UsageError{"log needs a run ID"}
+		}
+		var offset int64
+		if len(args) > 2 {
+			offset = parseInt(args[2])
+		}
+		return Log(env, args[1], offset)
 	}
 	return &UsageError{fmt.Sprintf("unknown command %q", args[0])}
 }
@@ -171,6 +227,8 @@ type Info struct {
 	ClientVersion  string `json:"client_version"`
 	RunnerVersion  string `json:"runner_version"`
 	ServerHere     bool   `json:"server_here"`
+	// Applied is the hash of the settings bundle this client has.
+	Applied string `json:"applied"`
 }
 
 var (
@@ -217,6 +275,9 @@ func Detect(env *Env) Info {
 	}
 	if _, err := os.Stat(env.path(ServerUnit)); err == nil {
 		info.ServerHere = true
+	}
+	if st, err := env.loadStored(); err == nil {
+		info.Applied = st.Hash
 	}
 	return info
 }
@@ -292,6 +353,17 @@ func Uninstall(env *Env, keepHistory bool) error {
 			say("Removed the server's SSH key.")
 		}
 	}
+	timers, _ := filepath.Glob(env.path(filepath.Join(UnitDir, "pbcm-job-*.timer")))
+	for _, t := range timers {
+		env.Exec("systemctl", "disable", "--now", filepath.Base(t))
+		os.Remove(t)
+	}
+	os.Remove(env.path(filepath.Join(UnitDir, ServiceName)))
+	if len(timers) > 0 {
+		env.Exec("systemctl", "daemon-reload")
+		say("Removed %d backup schedule(s).", len(timers))
+	}
+	os.RemoveAll(env.path(RuntimeDir))
 	for _, p := range []string{SudoersPath, ConfigDir, filepath.Dir(Path)} {
 		if err := os.RemoveAll(env.path(p)); err != nil {
 			return err

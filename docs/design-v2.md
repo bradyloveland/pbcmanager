@@ -1,6 +1,6 @@
 # PBC Manager 2: design
 
-Status: **in progress**. Milestones 1 and 2 are built; see the progress table in the README.
+Status: **in progress**. Milestones 1, 2 and 3a are built; see the progress table in the README.
 
 Version 2 is a rewrite in Go of PBS Backup Manager 1.x, under a new name: **PBC Manager**. It manages file-level backups on many Linux machines (clients) from one central server, sending each client's backups to one or more Proxmox Backup Server (PBS) destinations.
 
@@ -110,7 +110,7 @@ The UI suggests turning off root password login over SSH once a client is added.
 | --- | --- |
 | `/usr/local/lib/pbcm/pbcm-runner` | Small Go program, owned by root, signed like server releases. It isn't a background service: systemd starts it for a backup, or the server starts it over SSH for one command, and it exits when done. |
 | `/etc/sudoers.d/pbcm` | `pbcm ALL=(root) NOPASSWD: /usr/local/lib/pbcm/pbcm-runner` |
-| `/etc/pbcm/client/jobs/<job>.json` | Folders, exclusions, options and destinations for each job |
+| `/etc/pbcm/client/bundle.json` | Every job and destination the server sent, without secrets, plus the bundle's hash (so the server knows what the client has) |
 | `/etc/pbcm/client/credentials/` | Token secrets and key file passwords (see [Credentials on clients](#credentials-on-clients)) |
 | `/etc/systemd/system/pbcm-job@.service` | One template unit used by every job |
 | `/etc/systemd/system/pbcm-job-<job>.timer` | One timer per scheduled job |
@@ -120,7 +120,7 @@ The UI suggests turning off root password login over SSH once a client is added.
 
 | Command | Does |
 | --- | --- |
-| `apply` | Reads a signed bundle of job files and credentials from its input, writes them, creates/removes timers, reloads systemd |
+| `apply` | Reads the bundle (jobs, destinations, credentials) from its input, writes it, creates/removes timers, reloads systemd. The SSH connection authenticates the server; the bundle isn't separately signed. |
 | `run <job>` | What the systemd unit runs: backs up to each destination in turn, writing the result and log |
 | `start <job>` / `cancel <job>` | `systemctl start` / stop with SIGINT, then SIGKILL after 20 s |
 | `status --since <cursor>` | Results finished since the server's last check, plus anything running now |
@@ -138,7 +138,7 @@ Clients must hold their PBS credentials, because they back up without the server
 
 - **Encrypted on disk:**
   - On systemd 250+ (Debian 12 and 13, Ubuntu 24.04), credentials are stored with `systemd-creds encrypt`. That ties them to the machine (and its TPM if it has one), so copying the file to another machine doesn't reveal them.
-  - The unit loads them with `LoadCredentialEncrypted=`.
+  - pbcm-runner decrypts them with `systemd-creds decrypt` into `/run/pbcm/<run>/` (memory only) for the length of a run, and deletes them afterwards.
   - Older systemd (Ubuntu 22.04 has 249) uses a root-only file loaded with `LoadCredential=`.
 - **Never on a command line or in an environment listing.** `pbcm-runner` points `proxmox-backup-client` at the credential file with `PBS_PASSWORD_FILE` and `PBS_ENCRYPTION_PASSWORD_FILE`, which Proxmox documents.
 - **One PBS token per client is recommended.** The token has only the `DatastoreBackup` role, on that client's own **namespace**. A compromised client can then only add backups to its own namespace. It can't read or delete anyone else's backups. The destination form explains how to set this up in PBS.
