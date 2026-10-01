@@ -26,7 +26,7 @@ On the new server, go to **Settings → Export and import → Import a settings 
 - each job, and anything it needs: a token secret, or a key file password
 - whether to bring over the email alert settings and the run-history limit
 
-**Imported jobs start paused.** Otherwise 1.x and version 2 would both back up the same folders. Leave **Turn the jobs' schedules on now** off.
+**Imported jobs start disabled.** Otherwise 1.x and version 2 would both back up the same folders. Leave **Enable the imported jobs now** off.
 
 What doesn't come over:
 - **Run history.** It stays in 1.x.
@@ -45,7 +45,7 @@ systemctl disable --now pbs-manager
 
 ## 6. Turn on the new jobs
 
-For each imported job, choose **Edit job**, tick **Run on schedule**, and save. The client gets the schedule straight away. To try a job before its first scheduled run, press **Run now**. A paused job can't be run, not even by hand.
+Open each imported job and turn on the **Enabled** switch next to its name. The client gets the schedule straight away. To try a job before its first scheduled run, press **Run now**. A disabled job can't be run, not even by hand.
 
 ## 7. Remove 1.x
 

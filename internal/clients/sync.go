@@ -168,7 +168,7 @@ func (m *Manager) StartJob(ctx context.Context, jobID string) error {
 		return err
 	}
 	if !j.Enabled {
-		return &InputError{"This job is paused, so it can't run. Edit it and turn on Run on schedule first."}
+		return &InputError{"This job is disabled, so it can't run. Enable it first."}
 	}
 	if m.Pending(c) {
 		if err := m.Apply(ctx, c.ID); err != nil {

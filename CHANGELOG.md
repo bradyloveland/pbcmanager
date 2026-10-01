@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Jobs have an Enabled switch** next to their name at the top of the job page, so a job can be turned on or off without opening Edit job. It replaces the job form's "Run on schedule" checkbox, which read oddly next to a "By hand only" schedule. A disabled job doesn't run, on schedule or with Run now, and the job lists say **Disabled** instead of "Paused". ([#10](https://github.com/bradyloveland/pbcmanager/issues/10))
+
 ### Fixed
 - **Run now on a paused job.** The button was faded with the rest of the row, so it looked disabled, yet it still started a backup. A paused job now can't run at all: Run now is disabled, with a tooltip saying why, and the server refuses it too. Only the paused job's run history and next run are faded. ([#11](https://github.com/bradyloveland/pbcmanager/issues/11))
 

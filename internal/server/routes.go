@@ -68,6 +68,7 @@ func (s *Server) routes() {
 	m.HandleFunc("PUT /api/jobs/{id}", priv(s.apiJobUpdate))
 	m.HandleFunc("DELETE /api/jobs/{id}", priv(s.apiJobDelete))
 	m.HandleFunc("POST /api/jobs/{id}/run", priv(s.apiJobRun))
+	m.HandleFunc("POST /api/jobs/{id}/enabled", priv(s.apiJobEnabled))
 	m.HandleFunc("POST /api/jobs/{id}/cancel", priv(s.apiJobCancel))
 	m.HandleFunc("GET /api/jobs/{id}/snapshots", priv(s.apiJobSnapshots))
 

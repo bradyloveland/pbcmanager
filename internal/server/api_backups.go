@@ -290,6 +290,33 @@ func (s *Server) apiJobDelete(w http.ResponseWriter, r *http.Request) (any, erro
 	return map[string]any{"ok": true}, nil
 }
 
+// apiJobEnabled turns a job on or off without sending the whole job form.
+func (s *Server) apiJobEnabled(w http.ResponseWriter, r *http.Request) (any, error) {
+	var in struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	if in.Enabled == nil {
+		return nil, badRequest("Say whether the job should be enabled.")
+	}
+	j, err := s.store.GetJob(r.PathValue("id"))
+	if err != nil {
+		return nil, &apiError{http.StatusNotFound, "That job doesn't exist anymore."}
+	}
+	j.Enabled = *in.Enabled
+	if err := s.store.SaveJob(j); err != nil {
+		return nil, err
+	}
+	s.clients.ApplyAsync(j.ClientID)
+	cm, dm, err := s.lookups()
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"job": s.jobView(j, cm, dm)}, nil
+}
+
 func (s *Server) apiJobRun(w http.ResponseWriter, r *http.Request) (any, error) {
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
