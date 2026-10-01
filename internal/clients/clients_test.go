@@ -199,6 +199,31 @@ func TestSetupErrorIsReported(t *testing.T) {
 	}
 }
 
+func TestRefusedPbcmSignInSaysWhatToDo(t *testing.T) {
+	h := newHarness(t)
+	h.host.RefusePbcm(true) // like OpenMediaVault's AllowGroups root _ssh
+	c, v := h.add(t, Login{User: "root", Password: rootPW})
+	if v.OK || c.Status == store.ClientReady {
+		t.Fatalf("setup should report the refused sign-in: %+v", v)
+	}
+	msg := c.StatusDetail
+	if !strings.Contains(msg, `usermod -aG _ssh pbcm`) || !strings.Contains(msg, "Then use Repair") || strings.Contains(msg, "..") {
+		t.Fatalf("message: %q", msg)
+	}
+	// Once the client lets pbcm in, Repair finishes the job.
+	h.host.RefusePbcm(false)
+	task, err := h.m.Repair(c.ID, Login{User: "root", Password: rootPW}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := wait(t, task); !v.OK {
+		t.Fatalf("repair: %+v", v)
+	}
+	if c, _ = h.st.GetClient(c.ID); c.Status != store.ClientReady {
+		t.Fatalf("after repair: %s %s", c.Status, c.StatusDetail)
+	}
+}
+
 func TestSignInWithServerKey(t *testing.T) {
 	h := newHarness(t)
 	h.host.AuthorizeRootKey(h.m.identity.Signer.PublicKey())

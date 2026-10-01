@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **Adding an OpenMediaVault client failed after setup** because OMV only lets the `_ssh` group sign in over SSH (`AllowGroups root _ssh`). Setup now adds the `pbcm` account to an allowed group when sshd limits sign-ins by group. It never chooses one that grants admin rights, such as `sudo` or `docker`. When the limit is by user (`AllowUsers`) or a `Deny…` rule, setup leaves `sshd_config` alone and says exactly what to change. ([#9](https://github.com/bradyloveland/pbcmanager/issues/9))
+- When the server can't sign in as `pbcm` after setup, the message now says what to do, including the OpenMediaVault command, without a doubled full stop.
 - **Run now on a paused job.** The button was faded with the rest of the row, so it looked disabled, yet it still started a backup. A paused job now can't run at all: Run now is disabled, with a tooltip saying why, and the server refuses it too. Only the paused job's run history and next run are faded. ([#11](https://github.com/bradyloveland/pbcmanager/issues/11))
 
 ## [2.0.0] - 2026-10-01
