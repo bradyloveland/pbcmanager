@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/version"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/web"
+	"github.com/bradyloveland/pbcmanager/internal/version"
+	"github.com/bradyloveland/pbcmanager/web"
 )
 
 func (s *Server) routes() {

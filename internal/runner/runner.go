@@ -1,4 +1,4 @@
-// Package runner is pbcwm-runner, the small program installed on each client.
+// Package runner is pbcm-runner, the small program installed on each client.
 // It isn't a background service: the server starts it over SSH for one
 // command (through a forced command and a sudo rule that allow nothing else),
 // and later milestones have systemd start it for backups.
@@ -18,20 +18,20 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/version"
+	"github.com/bradyloveland/pbcmanager/internal/version"
 )
 
 // Fixed locations on a client.
 const (
-	Path        = "/usr/local/lib/pbcwm/pbcwm-runner"
-	SudoersPath = "/etc/sudoers.d/pbcwm"
-	ConfigDir   = "/etc/pbcwm/client"
-	StateDir    = "/var/lib/pbcwm/client"
-	Account     = "pbcwm"
+	Path        = "/usr/local/lib/pbcm/pbcm-runner"
+	SudoersPath = "/etc/sudoers.d/pbcm"
+	ConfigDir   = "/etc/pbcm/client"
+	StateDir    = "/var/lib/pbcm/client"
+	Account     = "pbcm"
 	// KeyMarker identifies authorized_keys lines this project added.
-	KeyMarker = `command="sudo -n /usr/local/lib/pbcwm/pbcwm-runner ssh"`
+	KeyMarker = `command="sudo -n /usr/local/lib/pbcm/pbcm-runner ssh"`
 	// ServerUnit exists when the server itself is installed on this machine.
-	ServerUnit = "/etc/systemd/system/pbcwm.service"
+	ServerUnit = "/etc/systemd/system/pbcm.service"
 )
 
 // Env is what commands touch, so tests can point them elsewhere.
@@ -95,7 +95,7 @@ func Dispatch(env *Env, args []string) error {
 		info := Detect(env)
 		return json.NewEncoder(env.Stdout).Encode(info)
 	case "browse":
-		path := "/srv"
+		path := "/"
 		if len(args) > 1 {
 			path = args[1]
 		}
@@ -270,7 +270,7 @@ func Browse(env *Env, path string) (*Listing, error) {
 
 // Uninstall removes everything this project put on the client: the sudo
 // rule, the server's key, the runner, client settings and (unless keepHistory)
-// run history. The pbcwm account is removed a few seconds later, once this
+// run history. The pbcm account is removed a few seconds later, once this
 // SSH session has ended, unless the server itself runs on this machine and
 // uses the same account.
 func Uninstall(env *Env, keepHistory bool) error {
@@ -297,7 +297,7 @@ func Uninstall(env *Env, keepHistory bool) error {
 			return err
 		}
 	}
-	say("Removed the sudo rule, settings and pbcwm-runner.")
+	say("Removed the sudo rule, settings and pbcm-runner.")
 	if !keepHistory {
 		if err := os.RemoveAll(env.path(StateDir)); err != nil {
 			return err
@@ -312,8 +312,8 @@ func Uninstall(env *Env, keepHistory bool) error {
 	if !keepHistory && home != "" {
 		script += "; rm -rf " + home
 	}
-	script += "; rmdir /etc/pbcwm 2>/dev/null; true"
-	if _, err := env.Exec("systemd-run", "--quiet", "--collect", "--unit=pbcwm-remove-account", "--on-active=2",
+	script += "; rmdir /etc/pbcm 2>/dev/null; true"
+	if _, err := env.Exec("systemd-run", "--quiet", "--collect", "--unit=pbcm-remove-account", "--on-active=2",
 		"/bin/sh", "-c", script); err != nil {
 		say("Remove the %s account by hand when convenient: userdel %s", Account, Account)
 		return nil

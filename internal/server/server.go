@@ -19,16 +19,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/auth"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/clients"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/config"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/sshx"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/store"
+	"github.com/bradyloveland/pbcmanager/internal/auth"
+	"github.com/bradyloveland/pbcmanager/internal/clients"
+	"github.com/bradyloveland/pbcmanager/internal/config"
+	"github.com/bradyloveland/pbcmanager/internal/sshx"
+	"github.com/bradyloveland/pbcmanager/internal/store"
 )
 
 const (
-	sessionCookie = "pbcwm_session"
-	csrfHeader    = "X-PBCWM"
+	sessionCookie = "pbcm_session"
+	csrfHeader    = "X-PBCM"
 	maxBody       = 1 << 20
 )
 
@@ -42,7 +42,7 @@ type Options struct {
 	ConfirmWindow time.Duration
 	// Hostname overrides os.Hostname (tests).
 	Hostname string
-	// RunnerPath is the pbcwm-runner (linux/amd64) sent to clients. By
+	// RunnerPath is the pbcm-runner (linux/amd64) sent to clients. By
 	// default it's next to this program.
 	RunnerPath string
 }
@@ -90,10 +90,10 @@ func New(opts Options) (*Server, error) {
 	s.throttle.Delay = opts.FailDelay
 	if opts.RunnerPath == "" {
 		if exe, err := os.Executable(); err == nil {
-			opts.RunnerPath = filepath.Join(filepath.Dir(exe), "pbcwm-runner")
+			opts.RunnerPath = filepath.Join(filepath.Dir(exe), "pbcm-runner")
 		}
 	}
-	id, err := sshx.LoadOrCreateIdentity(filepath.Join(opts.ConfigDir, "ssh", "id_ed25519"), "pbcwm-server@"+opts.Hostname)
+	id, err := sshx.LoadOrCreateIdentity(filepath.Join(opts.ConfigDir, "ssh", "id_ed25519"), "pbcm-server@"+opts.Hostname)
 	if err != nil {
 		return nil, fmt.Errorf("server SSH key: %w", err)
 	}
@@ -125,7 +125,7 @@ func (s *Server) Start() error {
 	err = s.reconcileLocked()
 	s.mu.Unlock()
 	if err != nil {
-		return fmt.Errorf("%s Run “pbcwm network --reset” to go back to the defaults", err)
+		return fmt.Errorf("%s Run “pbcm network --reset” to go back to the defaults", err)
 	}
 	if n.UsesTLS() {
 		slog.Info("serving HTTPS", "certificate", n.TLS)
@@ -374,7 +374,7 @@ func (s *Server) api(needAuth bool, fn handler) http.HandlerFunc {
 			default:
 				slog.Error("request failed", "method", r.Method, "path", r.URL.Path, "err", err)
 				writeJSON(w, http.StatusInternalServerError, map[string]string{
-					"error": "Something went wrong on the server. Check the service log (journalctl -u pbcwm)."})
+					"error": "Something went wrong on the server. Check the service log (journalctl -u pbcm)."})
 			}
 			return
 		}

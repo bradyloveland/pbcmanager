@@ -1,8 +1,8 @@
-# Proxmox Backup Client Web Manager 2: design
+# PBC Manager 2: design
 
 Status: **in progress**. Milestones 1 and 2 are built; see the progress table in the README.
 
-Version 2 is a rewrite in Go of PBS Backup Manager 1.x, under a new name: **Proxmox Backup Client Web Manager**. It manages file-level backups on many Linux machines (clients) from one central server, sending each client's backups to one or more Proxmox Backup Server (PBS) destinations.
+Version 2 is a rewrite in Go of PBS Backup Manager 1.x, under a new name: **PBC Manager**. It manages file-level backups on many Linux machines (clients) from one central server, sending each client's backups to one or more Proxmox Backup Server (PBS) destinations.
 
 The key rule: **the server is only for managing and watching. Clients never depend on it.** Each client keeps its own schedule and credentials and backs up straight to PBS. If the server is down, offline or deleted, every client keeps backing up on schedule.
 
@@ -35,12 +35,12 @@ The project isn't affiliated with or endorsed by Proxmox Server Solutions GmbH. 
 
 | Thing | Name |
 | --- | --- |
-| Product | Proxmox Backup Client Web Manager |
-| Repository | `bradyloveland/proxmoxbackupclientwebmanager` |
-| Server program and service | `pbcwm`, `pbcwm.service` |
-| Program on clients | `pbcwm-runner` |
-| Service account on clients | `pbcwm` |
-| Folders | `/opt/pbcwm`, `/etc/pbcwm`, `/var/lib/pbcwm` (same layout on server and clients) |
+| Product | PBC Manager |
+| Repository | `bradyloveland/pbcmanager` |
+| Server program and service | `pbcm`, `pbcm.service` |
+| Program on clients | `pbcm-runner` |
+| Service account on clients | `pbcm` |
+| Folders | `/opt/pbcm`, `/etc/pbcm`, `/var/lib/pbcm` (same layout on server and clients) |
 
 ## Supported clients
 
@@ -61,16 +61,16 @@ Clients also need systemd. Every supported Debian release has it.
 
 ```
                  ┌─────────────────────── server (LXC) ───────────────────────┐
-Browser ─HTTPS─> │ pbcwm: web UI + API, SQLite, SSH key, updater, notifier    │
+Browser ─HTTPS─> │ pbcm: web UI + API, SQLite, SSH key, updater, notifier    │
                  └───────┬──────────────────────────────────────┬─────────────┘
-                         │ SSH as pbcwm (set up, start,         │ PBS API (server's own
+                         │ SSH as pbcm (set up, start,         │ PBS API (server's own
                          │ cancel, collect status and logs)     │ proxmox-backup-client):
                          ▼                                      │ space, snapshot lists
    ┌──────────────────── client ─────────────────────┐          │
-   │ systemd timer ─> pbcwm-runner run <job>          │          ▼
+   │ systemd timer ─> pbcm-runner run <job>          │          ▼
    │   └─> proxmox-backup-client backup ─────────────┼──────> PBS destination(s)
-   │ /etc/pbcwm: jobs, credentials                   │
-   │ /var/lib/pbcwm: run results and logs            │
+   │ /etc/pbcm: jobs, credentials                   │
+   │ /var/lib/pbcm: run results and logs            │
    └──────────────────────────────────────────────────┘
 ```
 
@@ -84,7 +84,7 @@ Browser ─HTTPS─> │ pbcwm: web UI + API, SQLite, SSH key, updater, notifier
 | **Server is restarted or updated** | Same as above: no backup is interrupted. |
 | **Client is offline** | The server shows it as offline, and alerts you if it misses a scheduled backup or stays unreachable (time limit set in Settings). Changes you make to its jobs are saved as "waiting to apply" and sent when it's back. |
 | **PBS destination is down** | The run fails on the client with the client's error message, as in 1.x. The server reports it when it collects the result. |
-| **Server deleted for good** | Clients keep backing up on their last settings forever. The docs explain how to remove everything from a client by hand (one command: `pbcwm-runner uninstall`). |
+| **Server deleted for good** | Clients keep backing up on their last settings forever. The docs explain how to remove everything from a client by hand (one command: `pbcm-runner uninstall`). |
 
 ## Clients
 
@@ -95,13 +95,13 @@ Browser ─HTTPS─> │ pbcwm: web UI + API, SQLite, SSH key, updater, notifier
 3. Over that one root connection, the server:
    1. detects the OS, CPU type and systemd version
    2. installs `proxmox-backup-client` if it's missing ([Supported clients](#supported-clients)), streaming the output into the UI
-   3. creates the `pbcwm` system user, with no password and a locked password login
-   4. adds the server's public key to that user's `authorized_keys`, with `restrict` and a forced command: `command="sudo -n /usr/local/lib/pbcwm/pbcwm-runner ssh"`. Whatever the server asks for arrives in `SSH_ORIGINAL_COMMAND`, which pbcwm-runner parses itself (no shell), so the key can't run anything else even if the server is compromised
-   5. installs `pbcwm-runner`, plus a sudo rule letting `pbcwm` run **only** `pbcwm-runner` (and keeping `SSH_ORIGINAL_COMMAND`). The rule is checked with `visudo -c` before it's put in place.
+   3. creates the `pbcm` system user, with no password and a locked password login
+   4. adds the server's public key to that user's `authorized_keys`, with `restrict` and a forced command: `command="sudo -n /usr/local/lib/pbcm/pbcm-runner ssh"`. Whatever the server asks for arrives in `SSH_ORIGINAL_COMMAND`, which pbcm-runner parses itself (no shell), so the key can't run anything else even if the server is compromised
+   5. installs `pbcm-runner`, plus a sudo rule letting `pbcm` run **only** `pbcm-runner` (and keeping `SSH_ORIGINAL_COMMAND`). The rule is checked with `visudo -c` before it's put in place.
    6. installs the systemd unit templates
-4. The server signs in again as `pbcwm` to prove the new account works, then **forgets the root password**.
+4. The server signs in again as `pbcm` to prove the new account works, then **forgets the root password**.
 
-The setup files (the script, pbcwm-runner and the server's key) are uploaded into a private temporary folder and the script runs from there. With a sudo user, the password goes only to `sudo -S` on standard input, never on a command line or to any other command. Root is never used again unless you choose **Repair client**, which asks for root again.
+The setup files (the script, pbcm-runner and the server's key) are uploaded into a private temporary folder and the script runs from there. With a sudo user, the password goes only to `sudo -S` on standard input, never on a command line or to any other command. Root is never used again unless you choose **Repair client**, which asks for root again.
 
 The UI suggests turning off root password login over SSH once a client is added. The server doesn't change the client's SSH settings itself.
 
@@ -109,15 +109,15 @@ The UI suggests turning off root password login over SSH once a client is added.
 
 | Item | Purpose |
 | --- | --- |
-| `/usr/local/lib/pbcwm/pbcwm-runner` | Small Go program, owned by root, signed like server releases. It isn't a background service: systemd starts it for a backup, or the server starts it over SSH for one command, and it exits when done. |
-| `/etc/sudoers.d/pbcwm` | `pbcwm ALL=(root) NOPASSWD: /usr/local/lib/pbcwm/pbcwm-runner` |
-| `/etc/pbcwm/client/jobs/<job>.json` | Folders, exclusions, options and destinations for each job |
-| `/etc/pbcwm/client/credentials/` | Token secrets and key file passwords (see [Credentials on clients](#credentials-on-clients)) |
-| `/etc/systemd/system/pbcwm-job@.service` | One template unit used by every job |
-| `/etc/systemd/system/pbcwm-job-<job>.timer` | One timer per scheduled job |
-| `/var/lib/pbcwm/client/runs/` | One folder per run with its result and log. Kept for 90 days or the last 500 runs. Both limits can be changed in Settings. |
+| `/usr/local/lib/pbcm/pbcm-runner` | Small Go program, owned by root, signed like server releases. It isn't a background service: systemd starts it for a backup, or the server starts it over SSH for one command, and it exits when done. |
+| `/etc/sudoers.d/pbcm` | `pbcm ALL=(root) NOPASSWD: /usr/local/lib/pbcm/pbcm-runner` |
+| `/etc/pbcm/client/jobs/<job>.json` | Folders, exclusions, options and destinations for each job |
+| `/etc/pbcm/client/credentials/` | Token secrets and key file passwords (see [Credentials on clients](#credentials-on-clients)) |
+| `/etc/systemd/system/pbcm-job@.service` | One template unit used by every job |
+| `/etc/systemd/system/pbcm-job-<job>.timer` | One timer per scheduled job |
+| `/var/lib/pbcm/client/runs/` | One folder per run with its result and log. Kept for 90 days or the last 500 runs. Both limits can be changed in Settings. |
 
-`pbcwm-runner` commands (the server calls these through `sudo`):
+`pbcm-runner` commands (the server calls these through `sudo`):
 
 | Command | Does |
 | --- | --- |
@@ -129,9 +129,9 @@ The UI suggests turning off root password login over SSH once a client is added.
 | `browse <path>`, `du <path>` | Folder picker and folder sizes (`du` at idle priority, with a fallback, as in 1.x) |
 | `detect`, `install-client` | OS detection and installing `proxmox-backup-client` |
 | `self-update` | Replaces itself with a new signed version read from its input |
-| `uninstall` | Removes timers, units, files, the sudo rule and the `pbcwm` user. With `--keep-history` it keeps `/var/lib/pbcwm`. |
+| `uninstall` | Removes timers, units, files, the sudo rule and the `pbcm` user. With `--keep-history` it keeps `/var/lib/pbcm`. |
 
-Every command checks its arguments and works only on `pbcwm` files and units. Root through the sudo rule can't be used for anything else.
+Every command checks its arguments and works only on `pbcm` files and units. Root through the sudo rule can't be used for anything else.
 
 ### Credentials on clients
 
@@ -141,7 +141,7 @@ Clients must hold their PBS credentials, because they back up without the server
   - On systemd 250+ (Debian 12 and 13), credentials are stored with `systemd-creds encrypt`. That ties them to the machine (and its TPM if it has one), so copying the file to another machine doesn't reveal them.
   - The unit loads them with `LoadCredentialEncrypted=`.
   - Older systemd (Debian 10/11) uses a root-only file loaded with `LoadCredential=`.
-- **Never on a command line or in an environment listing.** `pbcwm-runner` points `proxmox-backup-client` at the credential file with `PBS_PASSWORD_FILE` and `PBS_ENCRYPTION_PASSWORD_FILE`, which Proxmox documents. Older client versions, such as the Debian 10 package, get checked during implementation.
+- **Never on a command line or in an environment listing.** `pbcm-runner` points `proxmox-backup-client` at the credential file with `PBS_PASSWORD_FILE` and `PBS_ENCRYPTION_PASSWORD_FILE`, which Proxmox documents. Older client versions, such as the Debian 10 package, get checked during implementation.
 - **One PBS token per client is recommended.** The token has only the `DatastoreBackup` role, on that client's own **namespace**. A compromised client can then only add backups to its own namespace. It can't read or delete anyone else's backups. The destination form explains how to set this up in PBS.
   - A destination has default credentials and an optional namespace.
   - A client can override both for that destination.
@@ -158,16 +158,16 @@ Clients must hold their PBS credentials, because they back up without the server
 - **Schedules** are the 1.x types (by hand, certain days, every few hours), turned into systemd `OnCalendar=` timers.
   - `Persistent=false`, so missed runs are skipped as in 1.x.
   - systemd won't start a job that's already running, so a job never overlaps itself.
-- **Several destinations per job:** `pbcwm-runner run` backs up to each destination in turn, and records a result per destination. The overview shows each one. The job form points out that each extra destination reads every file again, and that a **PBS sync job** (one PBS pulling from another) is usually lighter for an offsite copy.
+- **Several destinations per job:** `pbcm-runner run` backs up to each destination in turn, and records a result per destination. The dashboard shows each one. The job form points out that each extra destination reads every file again, and that a **PBS sync job** (one PBS pulling from another) is usually lighter for an offsite copy.
 - **Backups at once per client:** a setting, enforced on the client with a systemd slice. That way it still holds when the server is down.
-- **Run now** calls `pbcwm-runner start` over SSH. **Cancel** calls `cancel`.
+- **Run now** calls `pbcm-runner start` over SSH. **Cancel** calls `cancel`.
 
 ## Server
 
-- **One executable**, with the web UI built in (`go:embed`). It's pure Go, so it builds for x86-64 and ARM64 with no C compiler. The server can run on ARM even though clients can't. `pbcwm-runner` builds from the same code.
+- **One executable**, with the web UI built in (`go:embed`). It's pure Go, so it builds for x86-64 and ARM64 with no C compiler. The server can run on ARM even though clients can't. `pbcm-runner` builds from the same code.
 - **Dependencies kept small:** `golang.org/x/crypto/ssh` and a pure-Go SQLite driver (`modernc.org/sqlite`). Anything else needs a reason.
 - **Web UI:** plain JavaScript with no framework and no CDNs, so it works offline under a strict CSP. It's split into a few files, all embedded in the executable.
-- **Runs as an unprivileged user,** `pbcwm`. It never reads backup data. Backing up the server's own machine works like any other client, over SSH to `127.0.0.1`.
+- **Runs as an unprivileged user,** `pbcm`. It never reads backup data. Backing up the server's own machine works like any other client, over SSH to `127.0.0.1`.
 - **The server's own `proxmox-backup-client`** is used only to read datastore space and snapshot lists.
 
 ### Data model
@@ -185,7 +185,7 @@ Clients must hold their PBS credentials, because they back up without the server
 
 Schema changes run as numbered migrations at startup.
 
-Secrets in the database are encrypted with a key kept in a separate file (`/etc/pbcwm/secret.key`). A copied database file alone doesn't reveal them.
+Secrets in the database are encrypted with a key kept in a separate file (`/etc/pbcm/secret.key`). A copied database file alone doesn't reveal them.
 
 ### Email alerts
 
@@ -214,16 +214,16 @@ The repository is public, so the server can check GitHub's releases without a to
 
 ### Installing a release on the server
 
-1. Back up the database to `backups/pbcwm-<old version>-<time>.db`.
-2. Write the new executable next to the old one, keep the old one as `pbcwm.prev`, and swap them in one step (rename).
+1. Back up the database to `backups/pbcm-<old version>-<time>.db`.
+2. Write the new executable next to the old one, keep the old one as `pbcm.prev`, and swap them in one step (rename).
 3. Exit. systemd restarts the service, and the new version applies any database migrations. Backups on clients aren't affected.
-4. If the new version doesn't report healthy within 60 seconds, or fails to start three times, a small `pbcwm-rollback` unit (started by `OnFailure=`) puts back the previous version and database. The UI then says the update was rolled back, and why.
+4. If the new version doesn't report healthy within 60 seconds, or fails to start three times, a small `pbcm-rollback` unit (started by `OnFailure=`) puts back the previous version and database. The UI then says the update was rolled back, and why.
 
 The service user owns the install folder, so this needs no root access.
 
 ### Updating clients
 
-After the server updates, it sends the matching `pbcwm-runner` to each client with `self-update`. The runner checks the signature itself before replacing anything. The UI lists each client's runner version.
+After the server updates, it sends the matching `pbcm-runner` to each client with `self-update`. The runner checks the signature itself before replacing anything. The UI lists each client's runner version.
 
 The server keeps working with runners one minor version behind, so an offline client is fine until it's back.
 
@@ -251,12 +251,12 @@ Every setting that was CLI-only or config-file-only in 1.x is on a **Settings** 
 
 **What still needs a terminal:**
 - The first install: one command in the LXC.
-- Recovery commands for when you're locked out of the web UI: `pbcwm passwd`, `pbcwm totp-reset`, and `pbcwm network --reset` (every interface, port 8099, self-signed HTTPS).
-- `pbcwm-runner uninstall` on a client whose server is gone.
+- Recovery commands for when you're locked out of the web UI: `pbcm passwd`, `pbcm totp-reset`, and `pbcm network --reset` (every interface, port 8099, self-signed HTTPS).
+- `pbcm-runner uninstall` on a client whose server is gone.
 
 ## Install
 
-- **One command** inside a fresh Debian 12/13 LXC downloads the latest release, checks its signature, and installs. It creates the `pbcwm` user, the systemd units and the server's own `proxmox-backup-client`, then prints the URL and a **one-time setup code**.
+- **One command** inside a fresh Debian 12/13 LXC downloads the latest release, checks its signature, and installs. It creates the `pbcm` user, the systemd units and the server's own `proxmox-backup-client`, then prints the URL and a **one-time setup code**.
 - **First visit:** the browser asks for the setup code, then an admin username and password. The setup code stops anyone else on the network from claiming a fresh install first.
 - **Installer options:** port, `--behind-proxy`, `--proxy-ip` and `--base-path` keep working for scripted installs. All of them can be changed later in the UI.
 - The docs will include an LXC recipe: an unprivileged container with a small disk. It needs no access to backup data.
@@ -298,7 +298,7 @@ Everything in 1.2.0, now per client:
 - **The server is still a high-value machine.** It holds every destination's credentials and can push job settings to every client. Someone who takes over the server could add their own PBS destination to a job and copy a client's data out.
   - Protect the server: VPN only, two-step sign-in, updates kept current.
   - A later 2.x option could let a client accept only destinations approved during root setup.
-- **Server compromise doesn't give a shell on clients.** The `pbcwm` account can only run `pbcwm-runner`, and the runner only does the commands listed above.
+- **Server compromise doesn't give a shell on clients.** The `pbcm` account can only run `pbcm-runner`, and the runner only does the commands listed above.
 - **PBS tokens with only `DatastoreBackup` on a per-client namespace can't delete backups.** Even a compromised client or server can't erase existing backup history.
 - **Releases and runner updates are signed,** and checked on both server and client.
 
@@ -310,7 +310,7 @@ Everything in 1.2.0, now per client:
 - **Container test in CI:**
   - start Debian 12 and 13 containers with SSH and systemd
   - add each as a client using a root password
-  - check that the real `proxmox-backup-client` gets installed, that the `pbcwm` account and sudo rule work, and that a timer fires on schedule with the server stopped
+  - check that the real `proxmox-backup-client` gets installed, that the `pbcm` account and sudo rule work, and that a timer fires on schedule with the server stopped
   - no PBS server is needed
 - **Updater tests:** build two signed versions with a test key, update from one to the other, and check rollback with a deliberately broken build.
 - **Browser smoke test:** Playwright, kept optional.
@@ -321,9 +321,9 @@ Everything in 1.2.0, now per client:
 | Milestone | Delivers |
 | --- | --- |
 | **M1: base** | Go project, SQLite and migrations, auth (password, TOTP, recovery codes, throttling), setup in the browser, Settings page, embedded UI shell, CI, installer |
-| **M2: clients** | SSH key, adding a client as root, host key pinning, OS detection, installing `proxmox-backup-client`, `pbcwm` account and sudo rule, `pbcwm-runner` install, folder browser, Repair and Remove client |
+| **M2: clients** | SSH key, adding a client as root, host key pinning, OS detection, installing `proxmox-backup-client`, `pbcm` account and sudo rule, `pbcm-runner` install, folder browser, Repair and Remove client |
 | **M3: backups** | Destinations and per-client overrides, jobs with several destinations, `apply`, timers, `run`/`start`/`cancel`, credentials on clients, status catch-up, live logs, snapshots, email alerts including missed and unreachable |
-| **M4: dashboard** | Overview across clients, size widgets, Activity page, banners |
+| **M4: dashboard** | Results across clients, size widgets, Activity page, banners |
 | **M5: updates** | Signed releases, update check, upload, swap, health check, rollback, runner updates |
 | **M6: moving from 1.x and release** | 1.x import, docs, LXC recipe, testing on your machines → **2.0.0** |
 
@@ -331,6 +331,6 @@ Each milestone ends with passing tests and a pull request into `v2`, so you can 
 
 ## Open questions
 
-1. **Short names:** are `pbcwm`, `pbcwm-runner` and the `/opt/pbcwm` folders OK?
+1. **Short names:** are `pbcm`, `pbcm-runner` and the `/opt/pbcm` folders OK?
 2. **Run history on clients:** are 90 days / 500 runs good defaults?
 3. **Polling:** every 30 s during a run and every 5 min otherwise. OK?

@@ -16,11 +16,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/auth"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/config"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/secret"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/store"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/tlscert"
+	"github.com/bradyloveland/pbcmanager/internal/auth"
+	"github.com/bradyloveland/pbcmanager/internal/config"
+	"github.com/bradyloveland/pbcmanager/internal/secret"
+	"github.com/bradyloveland/pbcmanager/internal/store"
+	"github.com/bradyloveland/pbcmanager/internal/tlscert"
 )
 
 const password = "correct-horse-battery"
@@ -52,7 +52,7 @@ func newEnv(t *testing.T, n *config.Network, withAdmin bool) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st, err := store.Open(filepath.Join(dir, "pbcwm.db"), box)
+	st, err := store.Open(filepath.Join(dir, "pbcm.db"), box)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestLoginLogoutAndCookie(t *testing.T) {
 	r := c.post("/api/login", map[string]string{"username": "ADMIN", "password": password})
 	expect(t, r, 200, `"user":"admin"`)
 	cookie := r.header.Get("Set-Cookie")
-	for _, want := range []string{"pbcwm_session=", "HttpOnly", "SameSite=Strict"} {
+	for _, want := range []string{"pbcm_session=", "HttpOnly", "SameSite=Strict"} {
 		if !strings.Contains(cookie, want) {
 			t.Errorf("cookie %q missing %s", cookie, want)
 		}
@@ -322,7 +322,7 @@ func TestTwoStepFlow(t *testing.T) {
 		t.Fatal("expected an SVG QR code")
 	}
 	secret := strings.ReplaceAll(r.data["secret"].(string), " ", "")
-	if !strings.Contains(r.data["uri"].(string), "PBC%20Web%20Manager") {
+	if !strings.Contains(r.data["uri"].(string), "PBC%20Manager") {
 		t.Fatalf("uri %v", r.data["uri"])
 	}
 	expect(t, c.post("/api/account/totp/enable", map[string]string{"code": "000000"}), 400, "doesn't match")
@@ -724,7 +724,7 @@ func TestClientEndpoints(t *testing.T) {
 	c.login()
 	r := c.get("/api/settings/ssh")
 	expect(t, r, 200, "ssh-ed25519 ")
-	if !strings.HasPrefix(r.data["fingerprint"].(string), "SHA256:") || !strings.HasSuffix(r.data["public_key"].(string), "pbcwm-server@nas") {
+	if !strings.HasPrefix(r.data["fingerprint"].(string), "SHA256:") || !strings.HasSuffix(r.data["public_key"].(string), "pbcm-server@nas") {
 		t.Fatalf("ssh: %v", r.data)
 	}
 	// The key is created once and kept.

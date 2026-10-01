@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/clients"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/sshx"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/store"
+	"github.com/bradyloveland/pbcmanager/internal/clients"
+	"github.com/bradyloveland/pbcmanager/internal/sshx"
+	"github.com/bradyloveland/pbcmanager/internal/store"
 )
 
 // clientError turns client-side failures into messages for the user.
@@ -147,7 +147,7 @@ func (s *Server) apiClientBrowse(w http.ResponseWriter, r *http.Request) (any, e
 	defer cancel()
 	path := r.URL.Query().Get("path")
 	if path == "" {
-		path = "/srv"
+		path = "/"
 	}
 	l, err := s.clients.Browse(ctx, r.PathValue("id"), path)
 	return l, clientError(err)

@@ -124,7 +124,7 @@ func Probe(ctx context.Context, addr string, timeout time.Duration) (ssh.PublicK
 	_ = conn.SetDeadline(time.Now().Add(timeout))
 	var key ssh.PublicKey
 	cfg := &ssh.ClientConfig{
-		User: "pbcwm-probe",
+		User: "pbcm-probe",
 		HostKeyCallback: func(_ string, _ net.Addr, k ssh.PublicKey) error {
 			key = k
 			return errProbe

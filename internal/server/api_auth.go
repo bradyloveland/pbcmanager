@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/auth"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/qr"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/store"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/version"
+	"github.com/bradyloveland/pbcmanager/internal/auth"
+	"github.com/bradyloveland/pbcmanager/internal/qr"
+	"github.com/bradyloveland/pbcmanager/internal/store"
+	"github.com/bradyloveland/pbcmanager/internal/version"
 )
 
 var usernameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._@\-]{1,63}$`)
@@ -165,7 +165,7 @@ func (s *Server) apiSetup(w http.ResponseWriter, r *http.Request) (any, error) {
 	if !constantEqual(normalizeSetupCode(in.Code), normalizeSetupCode(want)) {
 		s.throttle.Fail(ip)
 		slog.Warn("wrong setup code", "ip", ip)
-		return nil, unauthorized("That setup code isn't right. It was shown when the server was installed; run “sudo pbcwm setup-code” on the server to see it again.")
+		return nil, unauthorized("That setup code isn't right. It was shown when the server was installed; run “sudo pbcm setup-code” on the server to see it again.")
 	}
 	username := strings.TrimSpace(in.Username)
 	if !usernameRE.MatchString(username) {

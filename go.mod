@@ -1,4 +1,4 @@
-module github.com/bradyloveland/proxmoxbackupclientwebmanager
+module github.com/bradyloveland/pbcmanager
 
 go 1.26.0
 

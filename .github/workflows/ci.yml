@@ -34,7 +34,7 @@ jobs:
   clients:
     # Sets up real Debian and Ubuntu machines (containers with an SSH
     # server) as clients: installs proxmox-backup-client from Proxmox, creates
-    # the pbcwm account and sudo rule, browses, repairs and uninstalls.
+    # the pbcm account and sudo rule, browses, repairs and uninstalls.
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -76,13 +76,13 @@ jobs:
           docker logs client; exit 1
       - name: Set up the client
         env:
-          PBCWM_IT_ADDR: 127.0.0.1:2222
-          PBCWM_IT_USER: ${{ matrix.user }}
-          PBCWM_IT_PASSWORD: ci-root-password
-          PBCWM_IT_EXPECT: ${{ matrix.expect }}
+          PBCM_IT_ADDR: 127.0.0.1:2222
+          PBCM_IT_USER: ${{ matrix.user }}
+          PBCM_IT_PASSWORD: ci-root-password
+          PBCM_IT_EXPECT: ${{ matrix.expect }}
         run: |
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$RUNNER_TEMP/pbcwm-runner" ./cmd/pbcwm-runner
-          PBCWM_IT_RUNNER="$RUNNER_TEMP/pbcwm-runner" go test -count=1 -v -run TestRealClient ./internal/clients/
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$RUNNER_TEMP/pbcm-runner" ./cmd/pbcm-runner
+          PBCM_IT_RUNNER="$RUNNER_TEMP/pbcm-runner" go test -count=1 -v -run TestRealClient ./internal/clients/
       - name: Container log
         if: failure()
         run: docker logs client | tail -50
@@ -114,36 +114,36 @@ jobs:
       - name: Unpack
         run: |
           cd dist && sha256sum -c SHA256SUMS
-          tar -xzf pbcwm-*-linux-amd64.tar.gz
+          tar -xzf pbcm-*-linux-amd64.tar.gz
       - name: Install
         run: |
-          cd dist/pbcwm-*-linux-amd64
+          cd dist/pbcm-*-linux-amd64
           sudo ./install.sh --skip-client | tee install.log
           grep -q "Setup code:" install.log
-          test -x /opt/pbcwm/pbcwm-runner
+          test -x /opt/pbcm/pbcm-runner
       - name: Serves HTTPS and asks for setup
         run: |
           curl -fsk https://127.0.0.1:8099/api/health
           curl -fsk https://127.0.0.1:8099/api/session | grep -q '"setup_needed":true'
-          code=$(sudo pbcwm setup-code)
-          curl -fsk https://127.0.0.1:8099/api/setup -H 'X-PBCWM: 1' -H 'Content-Type: application/json' \
+          code=$(sudo pbcm setup-code)
+          curl -fsk https://127.0.0.1:8099/api/setup -H 'X-PBCM: 1' -H 'Content-Type: application/json' \
             -d "{\"code\":\"$code\",\"username\":\"admin\",\"password\":\"ci-password-123\"}" | grep -q '"user":"admin"'
-          systemctl show -p User --value pbcwm | grep -qx pbcwm
-          test "$(sudo stat -c %U /var/lib/pbcwm/pbcwm.db)" = pbcwm
+          systemctl show -p User --value pbcm | grep -qx pbcm
+          test "$(sudo stat -c %U /var/lib/pbcm/pbcm.db)" = pbcm
       - name: Upgrade in place keeps settings
         run: |
-          cd dist/pbcwm-*-linux-amd64
+          cd dist/pbcm-*-linux-amd64
           sudo ./install.sh --skip-client --port 9443 | tee upgrade.log
           if grep -q "Setup code:" upgrade.log; then echo "setup code shown again after setup"; exit 1; fi
           curl -fsk https://127.0.0.1:9443/api/session | grep -q '"setup_needed":false'
       - name: Uninstall
         run: |
-          cd dist/pbcwm-*-linux-amd64
+          cd dist/pbcm-*-linux-amd64
           sudo ./uninstall.sh --purge
-          if systemctl is-active --quiet pbcwm; then echo "service still running"; exit 1; fi
-          if id pbcwm 2>/dev/null; then echo "account still there"; exit 1; fi
-          test ! -e /var/lib/pbcwm
-          test ! -e /opt/pbcwm
+          if systemctl is-active --quiet pbcm; then echo "service still running"; exit 1; fi
+          if id pbcm 2>/dev/null; then echo "account still there"; exit 1; fi
+          test ! -e /var/lib/pbcm
+          test ! -e /opt/pbcm
       - name: Service log
         if: failure()
-        run: sudo journalctl -u pbcwm --no-pager -n 100
+        run: sudo journalctl -u pbcm --no-pager -n 100

@@ -15,7 +15,7 @@ var Version = strings.TrimSpace(raw)
 
 const (
 	// Name is the full product name.
-	Name = "Proxmox Backup Client Web Manager"
+	Name = "PBC Manager"
 	// ShortName is used where space is tight: the sidebar, authenticator apps.
-	ShortName = "PBC Web Manager"
+	ShortName = "PBC Manager"
 )

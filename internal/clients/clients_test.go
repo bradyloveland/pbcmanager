@@ -18,16 +18,16 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/runner"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/secret"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/sshx"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/store"
+	"github.com/bradyloveland/pbcmanager/internal/runner"
+	"github.com/bradyloveland/pbcmanager/internal/secret"
+	"github.com/bradyloveland/pbcmanager/internal/sshx"
+	"github.com/bradyloveland/pbcmanager/internal/store"
 )
 
 // fakeHost is an SSH server that behaves like a Debian machine just enough
 // for setup: root and a sudo user sign in with passwords, setup "installs"
-// the pbcwm account, and pbcwm then signs in with the server's key and gets
-// pbcwm-runner answers.
+// the pbcm account, and pbcm then signs in with the server's key and gets
+// pbcm-runner answers.
 type fakeHost struct {
 	t        *testing.T
 	ln       net.Listener
@@ -35,7 +35,7 @@ type fakeHost struct {
 	hostKey  ssh.Signer
 	execs    []execRecord
 	files    map[string][]byte
-	pbcwmKey ssh.PublicKey // authorized for pbcwm once setup ran
+	pbcmKey  ssh.PublicKey // authorized for pbcm once setup ran
 	rootKey  ssh.PublicKey // authorized for root, if set
 	failWith string        // make setup.sh print this ERROR line
 	removed  bool
@@ -49,7 +49,7 @@ type execRecord struct {
 const (
 	rootPW  = "root-secret-pw"
 	alicePW = "alice-secret-pw"
-	tmpDir  = "/tmp/pbcwm-setup.Ab12Cd34"
+	tmpDir  = "/tmp/pbcm-setup.Ab12Cd34"
 )
 
 func newSigner(t *testing.T) ssh.Signer {
@@ -122,7 +122,7 @@ func (h *fakeHost) handle(nc net.Conn) {
 		PublicKeyCallback: func(m ssh.ConnMetadata, k ssh.PublicKey) (*ssh.Permissions, error) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
-			if m.User() == runner.Account && h.pbcwmKey != nil && bytes.Equal(k.Marshal(), h.pbcwmKey.Marshal()) {
+			if m.User() == runner.Account && h.pbcmKey != nil && bytes.Equal(k.Marshal(), h.pbcmKey.Marshal()) {
 				return nil, nil
 			}
 			if m.User() == "root" && h.rootKey != nil && bytes.Equal(k.Marshal(), h.rootKey.Marshal()) {
@@ -169,7 +169,7 @@ func (h *fakeHost) exec(user, cmd string, stdin []byte) (string, string, int) {
 	defer h.mu.Unlock()
 	h.execs = append(h.execs, execRecord{user, cmd, stdin})
 	if user == runner.Account {
-		// The forced command hands everything to pbcwm-runner.
+		// The forced command hands everything to pbcm-runner.
 		words, err := runner.SplitWords(cmd)
 		if err != nil || len(words) == 0 {
 			return "", "Error: bad command", 2
@@ -183,8 +183,8 @@ func (h *fakeHost) exec(user, cmd string, stdin []byte) (string, string, int) {
 			b, _ := json.Marshal(runner.Listing{Path: words[1], Parent: "/", Dirs: []string{"Media", "Documents"}})
 			return string(b), "", 0
 		case "uninstall":
-			h.removed, h.pbcwmKey = true, nil
-			return "Removed the sudo rule, settings and pbcwm-runner.\n", "", 0
+			h.removed, h.pbcmKey = true, nil
+			return "Removed the sudo rule, settings and pbcm-runner.\n", "", 0
 		}
 		return "", "Error: unknown command", 2
 	}
@@ -201,7 +201,7 @@ func (h *fakeHost) exec(user, cmd string, stdin []byte) (string, string, int) {
 			return "", "", 0
 		}
 		return "", "Sorry, try again.\n", 1
-	case cmd == "umask 077 && mktemp -d /tmp/pbcwm-setup.XXXXXXXX":
+	case cmd == "umask 077 && mktemp -d /tmp/pbcm-setup.XXXXXXXX":
 		return tmpDir + "\n", "", 0
 	case strings.HasPrefix(cmd, "cat > "):
 		path := strings.Trim(strings.TrimPrefix(cmd, "cat > "), "'")
@@ -213,7 +213,7 @@ func (h *fakeHost) exec(user, cmd string, stdin []byte) (string, string, int) {
 		if user != "root" && string(stdin) != alicePW+"\n" {
 			return "sudo: no password\n", "", 1
 		}
-		for _, f := range []string{"pbcwm-runner", "key.pub", "setup.sh"} {
+		for _, f := range []string{"pbcm-runner", "key.pub", "setup.sh"} {
 			if _, ok := h.files[tmpDir+"/"+f]; !ok {
 				return "ERROR: " + f + " is missing\n", "", 1
 			}
@@ -225,7 +225,7 @@ func (h *fakeHost) exec(user, cmd string, stdin []byte) (string, string, int) {
 		if err != nil {
 			return "ERROR: bad key\n", "", 1
 		}
-		h.pbcwmKey = k
+		h.pbcmKey = k
 		return "==> Setting up Debian GNU/Linux 12 (bookworm) (x86_64)\n==> Setup finished\n", "", 0
 	}
 	return "", "sh: unexpected command: " + cmd + "\n", 127
@@ -241,16 +241,16 @@ type harness struct {
 func newHarness(t *testing.T) *harness {
 	dir := t.TempDir()
 	box, _ := secret.LoadOrCreate(filepath.Join(dir, "secret.key"))
-	st, err := store.Open(filepath.Join(dir, "pbcwm.db"), box)
+	st, err := store.Open(filepath.Join(dir, "pbcm.db"), box)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	id, err := sshx.LoadOrCreateIdentity(filepath.Join(dir, "ssh", "id_ed25519"), "pbcwm-server@test")
+	id, err := sshx.LoadOrCreateIdentity(filepath.Join(dir, "ssh", "id_ed25519"), "pbcm-server@test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	runnerPath := filepath.Join(dir, "pbcwm-runner")
+	runnerPath := filepath.Join(dir, "pbcm-runner")
 	os.WriteFile(runnerPath, []byte("RUNNER-BINARY"), 0o755)
 	m := New(st, id, runnerPath)
 	m.timeout = 5 * time.Second
@@ -313,7 +313,7 @@ func TestAddAsRoot(t *testing.T) {
 	if c.OSPretty != "Debian GNU/Linux 12 (bookworm)" || c.ClientVersion != "3.4.1" || c.Hostname != "nas" || c.LastContact == 0 {
 		t.Fatalf("details not saved: %+v", c)
 	}
-	if string(h.host.file(tmpDir+"/pbcwm-runner")) != "RUNNER-BINARY" || !bytes.Equal(h.host.file(tmpDir+"/setup.sh"), setupScript) ||
+	if string(h.host.file(tmpDir+"/pbcm-runner")) != "RUNNER-BINARY" || !bytes.Equal(h.host.file(tmpDir+"/setup.sh"), setupScript) ||
 		strings.TrimSpace(string(h.host.file(tmpDir+"/key.pub"))) != h.m.identity.AuthorizedKey {
 		t.Fatal("uploaded files differ from what was sent")
 	}
@@ -324,8 +324,8 @@ func TestAddAsRoot(t *testing.T) {
 		}
 	}
 	// The password is never written anywhere.
-	raw, _ := os.ReadFile(filepath.Join(h.dir, "pbcwm.db"))
-	wal, _ := os.ReadFile(filepath.Join(h.dir, "pbcwm.db-wal"))
+	raw, _ := os.ReadFile(filepath.Join(h.dir, "pbcm.db"))
+	wal, _ := os.ReadFile(filepath.Join(h.dir, "pbcm.db-wal"))
 	if bytes.Contains(raw, []byte(rootPW)) || bytes.Contains(wal, []byte(rootPW)) || strings.Contains(joined, rootPW) {
 		t.Fatal("the root password was stored or logged")
 	}
@@ -441,7 +441,7 @@ func TestCheckBrowseHostKeyChangeRepairAndRemove(t *testing.T) {
 		t.Fatalf("browse: %+v %v", l, err)
 	}
 	last := h.host.records()[len(h.host.records())-1]
-	if last.user != "pbcwm" || last.cmd != "browse '/srv/My Files'" {
+	if last.user != "pbcm" || last.cmd != "browse '/srv/My Files'" {
 		t.Fatalf("browse ran %q as %s", last.cmd, last.user)
 	}
 

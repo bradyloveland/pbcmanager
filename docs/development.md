@@ -3,10 +3,10 @@
 ## Layout
 
 ```
-cmd/pbcwm/          The server program and its commands (serve, setup-code, passwd, totp-reset, network)
-cmd/pbcwm-runner/   The program installed on clients (always linux/amd64)
+cmd/pbcm/          The server program and its commands (serve, setup-code, passwd, totp-reset, network)
+cmd/pbcm-runner/   The program installed on clients (always linux/amd64)
 internal/clients/   Adding, checking, browsing, repairing and removing clients; setup.sh runs on the client
-internal/runner/    pbcwm-runner's commands (detect, browse, uninstall) and its forced-command parser
+internal/runner/    pbcm-runner's commands (detect, browse, uninstall) and its forced-command parser
 internal/sshx/      The server's SSH key, host key probing and pinning, running commands
 internal/auth/      Password hashing, TOTP, recovery codes, sign-in throttling
 internal/config/    Every setting: definitions, defaults, checks. Network settings.
@@ -35,7 +35,7 @@ Browser ── HTTP(S) ──> sniffing listener(s) ──> Server.ServeHTTP
 
 - **One program, no runtime dependencies.** The web UI is embedded with `go:embed`. The SQLite driver (`modernc.org/sqlite`) is pure Go, so `CGO_ENABLED=0` builds run on any Linux.
 - **Settings** live in the `settings` table as JSON. Each one is defined once in `internal/config/settings.go`, and the Settings page is generated from those definitions. A new setting needs a definition and the code that reads it, nothing else.
-- **Secrets** (the TOTP secret for now; tokens and passwords later) are encrypted with AES-256-GCM using `/etc/pbcwm/secret.key`. They're never returned by the API.
+- **Secrets** (the TOTP secret for now; tokens and passwords later) are encrypted with AES-256-GCM using `/etc/pbcm/secret.key`. They're never returned by the API.
 - **Sessions** are stored by the SHA-256 of their token, so they survive restarts and a database copy can't be used to sign in.
 - **Network changes that could lock you out** (address, port, HTTPS, base path) are *pending* until confirmed from the new address. While pending:
   - The server answers on both the old and the new settings.
@@ -43,9 +43,9 @@ Browser ── HTTP(S) ──> sniffing listener(s) ──> Server.ServeHTTP
   - If nobody confirms within about two minutes, the server goes back to the old settings.
   - A pending change is never saved, so a restart also undoes it.
 
-## Clients and pbcwm-runner
+## Clients and pbcm-runner
 
-`pbcwm-runner` is always built for linux/amd64, because that's the only platform `proxmox-backup-client` supports. The release archives (for both server architectures) include it next to `pbcwm`. The server reads it from beside its own executable, or from `PBCWM_RUNNER`.
+`pbcm-runner` is always built for linux/amd64, because that's the only platform `proxmox-backup-client` supports. The release archives (for both server architectures) include it next to `pbcm`. The server reads it from beside its own executable, or from `PBCM_RUNNER`.
 
 The fake SSH host in `internal/clients/clients_test.go` is the quickest way to see a change to the setup flow working.
 
@@ -101,7 +101,7 @@ Version 2 releases are tagged `v2.X.Y`. Bug fixes are patch releases (2.0.1) and
    - add the link reference at the bottom of `CHANGELOG.md`
 2. After it's merged, tag the merge commit and push the tag:
    ```bash
-   git tag -a vX.Y.Z -m "Proxmox Backup Client Web Manager X.Y.Z"
+   git tag -a vX.Y.Z -m "PBC Manager X.Y.Z"
    git push origin vX.Y.Z
    ```
 3. `.github/workflows/release.yml` runs the tests, checks the tag matches `VERSION`, builds the archives with `SHA256SUMS`, and publishes the release with that version's changelog section. Versions with a `-` (like `2.0.0-rc.1`) are marked as pre-releases.

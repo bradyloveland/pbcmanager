@@ -5,12 +5,12 @@ DEV_DIR ?= $(CURDIR)/tmp/dev
 .PHONY: build test lint check dist dev clean
 
 # Clients are always x86-64 Linux (the only platform proxmox-backup-client
-# supports), so pbcwm-runner is built for that whatever the server runs on.
+# supports), so pbcm-runner is built for that whatever the server runs on.
 RUNNER_BUILD := CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)"
 
 build:
-	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/pbcwm ./cmd/pbcwm
-	$(RUNNER_BUILD) -o bin/pbcwm-runner ./cmd/pbcwm-runner
+	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/pbcm ./cmd/pbcm
+	$(RUNNER_BUILD) -o bin/pbcm-runner ./cmd/pbcm-runner
 
 test:
 	go test -race ./...
@@ -27,10 +27,10 @@ check: lint test
 dist:
 	rm -rf dist && mkdir -p dist
 	for arch in amd64 arm64; do \
-		name=pbcwm-$(VERSION)-linux-$$arch; \
+		name=pbcm-$(VERSION)-linux-$$arch; \
 		mkdir -p dist/$$name; \
-		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$$name/pbcwm ./cmd/pbcwm || exit 1; \
-		$(RUNNER_BUILD) -o dist/$$name/pbcwm-runner ./cmd/pbcwm-runner || exit 1; \
+		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$$name/pbcm ./cmd/pbcm || exit 1; \
+		$(RUNNER_BUILD) -o dist/$$name/pbcm-runner ./cmd/pbcm-runner || exit 1; \
 		cp install.sh uninstall.sh LICENSE README.md CHANGELOG.md dist/$$name/; \
 		tar -C dist -czf dist/$$name.tar.gz $$name; \
 		rm -rf dist/$$name; \
@@ -40,10 +40,10 @@ dist:
 # Run locally on http://127.0.0.1:8099 with throwaway settings in tmp/dev.
 dev:
 	mkdir -p $(DEV_DIR)
-	$(RUNNER_BUILD) -o $(DEV_DIR)/pbcwm-runner ./cmd/pbcwm-runner
-	PBCWM_CONFIG_DIR=$(DEV_DIR)/conf PBCWM_DATA_DIR=$(DEV_DIR)/data go run ./cmd/pbcwm network --bind 127.0.0.1 --port 8099 --tls off >/dev/null
-	PBCWM_CONFIG_DIR=$(DEV_DIR)/conf PBCWM_DATA_DIR=$(DEV_DIR)/data go run ./cmd/pbcwm setup-code
-	PBCWM_CONFIG_DIR=$(DEV_DIR)/conf PBCWM_DATA_DIR=$(DEV_DIR)/data PBCWM_RUNNER=$(DEV_DIR)/pbcwm-runner go run ./cmd/pbcwm serve
+	$(RUNNER_BUILD) -o $(DEV_DIR)/pbcm-runner ./cmd/pbcm-runner
+	PBCM_CONFIG_DIR=$(DEV_DIR)/conf PBCM_DATA_DIR=$(DEV_DIR)/data go run ./cmd/pbcm network --bind 127.0.0.1 --port 8099 --tls off >/dev/null
+	PBCM_CONFIG_DIR=$(DEV_DIR)/conf PBCM_DATA_DIR=$(DEV_DIR)/data go run ./cmd/pbcm setup-code
+	PBCM_CONFIG_DIR=$(DEV_DIR)/conf PBCM_DATA_DIR=$(DEV_DIR)/data PBCM_RUNNER=$(DEV_DIR)/pbcm-runner go run ./cmd/pbcm serve
 
 clean:
 	rm -rf bin dist tmp

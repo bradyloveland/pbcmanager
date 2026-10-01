@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/secret"
+	"github.com/bradyloveland/pbcmanager/internal/secret"
 )
 
 func open(t *testing.T, dir string) *Store {

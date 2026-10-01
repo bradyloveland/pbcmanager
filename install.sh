@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Proxmox Backup Client Web Manager installer
+# PBC Manager installer
 #
 # Usage: sudo ./install.sh [options]
 #   --port N            Port for the web UI (default 8099)
@@ -18,12 +18,12 @@
 # including these options, can be changed later under Settings in the web UI.
 set -euo pipefail
 
-REPO="bradyloveland/proxmoxbackupclientwebmanager"
-APP_DIR=/opt/pbcwm
-CONF_DIR=/etc/pbcwm
-DATA_DIR=/var/lib/pbcwm
-USER_NAME=pbcwm
-UNIT=/etc/systemd/system/pbcwm.service
+REPO="bradyloveland/pbcmanager"
+APP_DIR=/opt/pbcm
+CONF_DIR=/etc/pbcm
+DATA_DIR=/var/lib/pbcm
+USER_NAME=pbcm
+UNIT=/etc/systemd/system/pbcm.service
 
 NET_ARGS=()
 WANT_VERSION=""
@@ -65,9 +65,9 @@ fetch() { # url dest
 }
 
 # ---- the program --------------------------------------------------------------
-if [[ -x "$SRC_DIR/pbcwm" && -z "$WANT_VERSION" ]]; then
-  BIN="$SRC_DIR/pbcwm"
-  RUNNER_BIN="$SRC_DIR/pbcwm-runner"
+if [[ -x "$SRC_DIR/pbcm" && -z "$WANT_VERSION" ]]; then
+  BIN="$SRC_DIR/pbcm"
+  RUNNER_BIN="$SRC_DIR/pbcm-runner"
   say "Installing from $SRC_DIR"
 else
   if [[ -z "$WANT_VERSION" ]]; then
@@ -76,18 +76,18 @@ else
     WANT_VERSION="$(grep -o '"tag_name": *"v2\.[0-9]*\.[0-9]*"' "$WORK/releases.json" | head -n1 | sed 's/.*"v\(.*\)"/\1/')"
     [[ -n "$WANT_VERSION" ]] || fail "Couldn't find a 2.x release on GitHub. Download one from https://github.com/$REPO/releases and run its install.sh."
   fi
-  NAME="pbcwm-$WANT_VERSION-linux-$ARCH"
+  NAME="pbcm-$WANT_VERSION-linux-$ARCH"
   say "Downloading version $WANT_VERSION"
   BASE_URL="https://github.com/$REPO/releases/download/v$WANT_VERSION"
   fetch "$BASE_URL/$NAME.tar.gz" "$WORK/$NAME.tar.gz" || fail "Couldn't download $NAME.tar.gz."
   fetch "$BASE_URL/SHA256SUMS" "$WORK/SHA256SUMS" || fail "Couldn't download the checksums."
   (cd "$WORK" && grep " $NAME.tar.gz\$" SHA256SUMS | sha256sum -c --quiet -) || fail "The download doesn't match its checksum. Try again."
   tar -xzf "$WORK/$NAME.tar.gz" -C "$WORK"
-  BIN="$WORK/$NAME/pbcwm"
-  RUNNER_BIN="$WORK/$NAME/pbcwm-runner"
+  BIN="$WORK/$NAME/pbcm"
+  RUNNER_BIN="$WORK/$NAME/pbcm-runner"
 fi
-[[ -f "$RUNNER_BIN" ]] || fail "pbcwm-runner is missing from the release files."
-"$BIN" version >/dev/null || fail "The pbcwm program won't run on this machine."
+[[ -f "$RUNNER_BIN" ]] || fail "pbcm-runner is missing from the release files."
+"$BIN" version >/dev/null || fail "The pbcm program won't run on this machine."
 NEW_VERSION="$("$BIN" version)"
 
 # ---- account and folders -------------------------------------------------------
@@ -100,24 +100,24 @@ install -d -o "$USER_NAME" -g "$USER_NAME" -m 700 "$CONF_DIR" "$DATA_DIR"
 install -d -o "$USER_NAME" -g "$USER_NAME" -m 755 "$APP_DIR"
 
 FRESH=1
-[[ -f "$DATA_DIR/pbcwm.db" ]] && FRESH=0
+[[ -f "$DATA_DIR/pbcm.db" ]] && FRESH=0
 OLD_VERSION=""
-[[ -x "$APP_DIR/pbcwm" ]] && OLD_VERSION="$("$APP_DIR/pbcwm" version 2>/dev/null || true)"
+[[ -x "$APP_DIR/pbcm" ]] && OLD_VERSION="$("$APP_DIR/pbcm" version 2>/dev/null || true)"
 
-systemctl stop pbcwm 2>/dev/null || true
-install -o "$USER_NAME" -g "$USER_NAME" -m 755 "$BIN" "$APP_DIR/pbcwm.new"
-mv -f "$APP_DIR/pbcwm.new" "$APP_DIR/pbcwm"
+systemctl stop pbcm 2>/dev/null || true
+install -o "$USER_NAME" -g "$USER_NAME" -m 755 "$BIN" "$APP_DIR/pbcm.new"
+mv -f "$APP_DIR/pbcm.new" "$APP_DIR/pbcm"
 # The copy sent to clients during setup (always x86-64, like proxmox-backup-client).
-install -o "$USER_NAME" -g "$USER_NAME" -m 755 "$RUNNER_BIN" "$APP_DIR/pbcwm-runner.new"
-mv -f "$APP_DIR/pbcwm-runner.new" "$APP_DIR/pbcwm-runner"
+install -o "$USER_NAME" -g "$USER_NAME" -m 755 "$RUNNER_BIN" "$APP_DIR/pbcm-runner.new"
+mv -f "$APP_DIR/pbcm-runner.new" "$APP_DIR/pbcm-runner"
 
-cat > /usr/local/bin/pbcwm <<EOF
+cat > /usr/local/bin/pbcm <<EOF
 #!/bin/sh
-# Runs pbcwm commands as the service account, so its files stay owned by it.
-if [ "\$(id -u)" = 0 ]; then exec runuser -u $USER_NAME -- $APP_DIR/pbcwm "\$@"; fi
-exec $APP_DIR/pbcwm "\$@"
+# Runs pbcm commands as the service account, so its files stay owned by it.
+if [ "\$(id -u)" = 0 ]; then exec runuser -u $USER_NAME -- $APP_DIR/pbcm "\$@"; fi
+exec $APP_DIR/pbcm "\$@"
 EOF
-chmod 755 /usr/local/bin/pbcwm
+chmod 755 /usr/local/bin/pbcm
 
 # ---- the server's own proxmox-backup-client ----------------------------------------
 # Only used to check datastore space and list snapshots. Backups run on clients.
@@ -150,20 +150,20 @@ fi
 
 # ---- settings ------------------------------------------------------------------------
 if [[ ${#NET_ARGS[@]} -gt 0 ]]; then
-  pbcwm network "${NET_ARGS[@]}" >/dev/null
+  pbcm network "${NET_ARGS[@]}" >/dev/null
   [[ $FRESH -eq 0 ]] && echo "Network settings updated."
 fi
 if [[ $FRESH -eq 1 ]]; then
-  SETUP_CODE="$(pbcwm setup-code)"
+  SETUP_CODE="$(pbcm setup-code)"
 else
-  SETUP_CODE="$(pbcwm setup-code | grep -E '^[A-Z0-9]{4}-' || true)"
+  SETUP_CODE="$(pbcm setup-code | grep -E '^[A-Z0-9]{4}-' || true)"
 fi
 
 # ---- service ---------------------------------------------------------------------------
 say "Installing the systemd service"
 cat > "$UNIT" <<EOF
 [Unit]
-Description=Proxmox Backup Client Web Manager
+Description=PBC Manager
 After=network-online.target
 Wants=network-online.target
 
@@ -171,7 +171,7 @@ Wants=network-online.target
 User=$USER_NAME
 Group=$USER_NAME
 Environment=HOME=$DATA_DIR
-ExecStart=$APP_DIR/pbcwm serve
+ExecStart=$APP_DIR/pbcm serve
 Restart=always
 RestartSec=5
 UMask=0077
@@ -194,16 +194,16 @@ LockPersonality=yes
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
-systemctl enable pbcwm >/dev/null 2>&1
+systemctl enable pbcm >/dev/null 2>&1
 
-started() { systemctl restart pbcwm && sleep 2 && systemctl is-active --quiet pbcwm; }
+started() { systemctl restart pbcm && sleep 2 && systemctl is-active --quiet pbcm; }
 if ! started; then
   # Containers without nesting can't use systemd's sandboxing (exit status 226).
-  if [[ "$(systemctl show -p ExecMainStatus --value pbcwm)" == "226" ]]; then
+  if [[ "$(systemctl show -p ExecMainStatus --value pbcm)" == "226" ]]; then
     echo "This container doesn't allow systemd's sandboxing, so it's turned off for this service."
     echo "Turn on the container's \"nesting\" feature to use it."
-    mkdir -p /etc/systemd/system/pbcwm.service.d
-    cat > /etc/systemd/system/pbcwm.service.d/no-sandbox.conf <<'EOF'
+    mkdir -p /etc/systemd/system/pbcm.service.d
+    cat > /etc/systemd/system/pbcm.service.d/no-sandbox.conf <<'EOF'
 [Service]
 ProtectSystem=no
 ProtectHome=no
@@ -214,14 +214,14 @@ ProtectKernelModules=no
 ProtectControlGroups=no
 EOF
     systemctl daemon-reload
-    started || fail "The service didn't start. See: journalctl -u pbcwm -n 50"
+    started || fail "The service didn't start. See: journalctl -u pbcm -n 50"
   else
-    fail "The service didn't start. See: journalctl -u pbcwm -n 50"
+    fail "The service didn't start. See: journalctl -u pbcm -n 50"
   fi
 fi
 
 # ---- done ------------------------------------------------------------------------------
-read -r SCHEME PORT BIND BASE < <(pbcwm network --show)
+read -r SCHEME PORT BIND BASE < <(pbcm network --show)
 [[ "$BASE" == "-" ]] && BASE=""
 HOST="$BIND"
 if [[ "$BIND" == "-" ]]; then
@@ -249,7 +249,7 @@ fi
 if [[ -n "$SETUP_CODE" ]]; then
   echo
   printf 'Setup code: \033[1m%s\033[0m\n' "$SETUP_CODE"
-  echo "Enter it in the browser to create the admin account. To see it again: sudo pbcwm setup-code"
+  echo "Enter it in the browser to create the admin account. To see it again: sudo pbcm setup-code"
 fi
 echo
-echo "Logs: journalctl -u pbcwm -f"
+echo "Logs: journalctl -u pbcm -f"

@@ -1,11 +1,11 @@
-// Command pbcwm is the Proxmox Backup Client Web Manager server.
+// Command pbcm is the PBC Manager server.
 //
-//	pbcwm serve          run the web UI
-//	pbcwm setup-code     show the one-time setup code
-//	pbcwm passwd         set the admin password
-//	pbcwm totp-reset     turn off two-step verification
-//	pbcwm network        change or reset how the web UI is reached
-//	pbcwm version        print the version
+//	pbcm serve          run the web UI
+//	pbcm setup-code     show the one-time setup code
+//	pbcm passwd         set the admin password
+//	pbcm totp-reset     turn off two-step verification
+//	pbcm network        change or reset how the web UI is reached
+//	pbcm version        print the version
 package main
 
 import (
@@ -24,19 +24,19 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/auth"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/config"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/secret"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/server"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/store"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/version"
+	"github.com/bradyloveland/pbcmanager/internal/auth"
+	"github.com/bradyloveland/pbcmanager/internal/config"
+	"github.com/bradyloveland/pbcmanager/internal/secret"
+	"github.com/bradyloveland/pbcmanager/internal/server"
+	"github.com/bradyloveland/pbcmanager/internal/store"
+	"github.com/bradyloveland/pbcmanager/internal/version"
 )
 
 type dirs struct{ config, data string }
 
 func (d *dirs) flags(fs *flag.FlagSet) {
-	fs.StringVar(&d.config, "config-dir", envOr("PBCWM_CONFIG_DIR", "/etc/pbcwm"), "settings folder: secret key and certificates")
-	fs.StringVar(&d.data, "data-dir", envOr("PBCWM_DATA_DIR", "/var/lib/pbcwm"), "data folder: the database")
+	fs.StringVar(&d.config, "config-dir", envOr("PBCM_CONFIG_DIR", "/etc/pbcm"), "settings folder: secret key and certificates")
+	fs.StringVar(&d.data, "data-dir", envOr("PBCM_DATA_DIR", "/var/lib/pbcm"), "data folder: the database")
 }
 
 func envOr(key, def string) string {
@@ -56,7 +56,7 @@ func (d dirs) open() (*store.Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return store.Open(filepath.Join(d.data, "pbcwm.db"), box)
+	return store.Open(filepath.Join(d.data, "pbcm.db"), box)
 }
 
 func main() {
@@ -95,7 +95,7 @@ func main() {
 func usage() {
 	fmt.Fprintf(os.Stderr, `%s %s
 
-Usage: pbcwm <command> [options]
+Usage: pbcm <command> [options]
 
 Commands:
   serve        Run the web UI
@@ -105,8 +105,8 @@ Commands:
   network      Change how the web UI is reached, or --reset to the defaults
   version      Print the version
 
-Every command takes --config-dir and --data-dir (defaults /etc/pbcwm and
-/var/lib/pbcwm). Run "pbcwm <command> -h" for its options.
+Every command takes --config-dir and --data-dir (defaults /etc/pbcm and
+/var/lib/pbcm). Run "pbcm <command> -h" for its options.
 `, version.Name, version.Version)
 }
 
@@ -128,7 +128,7 @@ func cmdServe(args []string) error {
 		return err
 	}
 	defer st.Close()
-	srv, err := server.New(server.Options{ConfigDir: d.config, Store: st, RunnerPath: os.Getenv("PBCWM_RUNNER")})
+	srv, err := server.New(server.Options{ConfigDir: d.config, Store: st, RunnerPath: os.Getenv("PBCM_RUNNER")})
 	if err != nil {
 		return err
 	}
@@ -247,7 +247,7 @@ func cmdPasswd(args []string) error {
 	}
 	fmt.Printf("Password changed for %q. Every browser has been signed out.\n", a.Username)
 	if a.TOTPSecret != "" {
-		fmt.Println("Two-step verification is still on. If you've also lost your authenticator, run: sudo pbcwm totp-reset")
+		fmt.Println("Two-step verification is still on. If you've also lost your authenticator, run: sudo pbcm totp-reset")
 	}
 	return nil
 }
@@ -361,6 +361,6 @@ func cmdNetwork(args []string) error {
 	}
 	fmt.Printf("Listen on %s, port %d, HTTPS %s, base path %s, trusted proxies %s.\n",
 		where, clean.Port, clean.TLS, basePath, proxyList)
-	fmt.Println("Restart the service to apply: sudo systemctl restart pbcwm")
+	fmt.Println("Restart the service to apply: sudo systemctl restart pbcm")
 	return nil
 }

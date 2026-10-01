@@ -9,38 +9,38 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/secret"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/sshx"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/store"
+	"github.com/bradyloveland/pbcmanager/internal/secret"
+	"github.com/bradyloveland/pbcmanager/internal/sshx"
+	"github.com/bradyloveland/pbcmanager/internal/store"
 )
 
 // TestRealClient sets up a real machine. CI runs it against fresh Debian and
 // Ubuntu containers; it's skipped unless these are set:
 //
-//	PBCWM_IT_ADDR      host:port of the client's SSH server
-//	PBCWM_IT_USER      user to sign in as for setup (root or a sudo user)
-//	PBCWM_IT_PASSWORD  that user's password
-//	PBCWM_IT_RUNNER    path to a linux/amd64 pbcwm-runner build
-//	PBCWM_IT_EXPECT    optional text the setup log must contain
+//	PBCM_IT_ADDR      host:port of the client's SSH server
+//	PBCM_IT_USER      user to sign in as for setup (root or a sudo user)
+//	PBCM_IT_PASSWORD  that user's password
+//	PBCM_IT_RUNNER    path to a linux/amd64 pbcm-runner build
+//	PBCM_IT_EXPECT    optional text the setup log must contain
 func TestRealClient(t *testing.T) {
-	addrStr := os.Getenv("PBCWM_IT_ADDR")
+	addrStr := os.Getenv("PBCM_IT_ADDR")
 	if addrStr == "" {
-		t.Skip("set PBCWM_IT_ADDR to run against a real client")
+		t.Skip("set PBCM_IT_ADDR to run against a real client")
 	}
 	host, portStr, _ := strings.Cut(addrStr, ":")
 	port, _ := strconv.Atoi(portStr)
 	dir := t.TempDir()
 	box, _ := secret.LoadOrCreate(filepath.Join(dir, "secret.key"))
-	st, err := store.Open(filepath.Join(dir, "pbcwm.db"), box)
+	st, err := store.Open(filepath.Join(dir, "pbcm.db"), box)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	id, err := sshx.LoadOrCreateIdentity(filepath.Join(dir, "ssh", "id_ed25519"), "pbcwm-server@ci")
+	id, err := sshx.LoadOrCreateIdentity(filepath.Join(dir, "ssh", "id_ed25519"), "pbcm-server@ci")
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := New(st, id, os.Getenv("PBCWM_IT_RUNNER"))
+	m := New(st, id, os.Getenv("PBCM_IT_RUNNER"))
 	ctx := context.Background()
 
 	probe, err := m.Probe(ctx, host, port)
@@ -49,7 +49,7 @@ func TestRealClient(t *testing.T) {
 	}
 	t.Logf("host key %s %s", probe.Type, probe.Fingerprint)
 	c, task, err := m.Add(AddRequest{Name: "ci", Address: host, Port: port, HostKey: probe.HostKey,
-		Login: Login{User: os.Getenv("PBCWM_IT_USER"), Password: os.Getenv("PBCWM_IT_PASSWORD")}})
+		Login: Login{User: os.Getenv("PBCM_IT_USER"), Password: os.Getenv("PBCM_IT_PASSWORD")}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestRealClient(t *testing.T) {
 	if !v.OK {
 		t.Fatalf("setup failed: %s", v.Error)
 	}
-	if want := os.Getenv("PBCWM_IT_EXPECT"); want != "" && !strings.Contains(log, want) {
+	if want := os.Getenv("PBCM_IT_EXPECT"); want != "" && !strings.Contains(log, want) {
 		t.Fatalf("setup log doesn't mention %q", want)
 	}
 	c, _ = st.GetClient(c.ID)
@@ -79,16 +79,16 @@ func TestRealClient(t *testing.T) {
 	if err != nil || !contains(l.Dirs, "etc") {
 		t.Fatalf("browse /: %+v %v", l, err)
 	}
-	// The pbcwm account can't do anything but run pbcwm-runner.
+	// The pbcm account can't do anything but run pbcm-runner.
 	if _, err := m.runnerCommand(ctx, c, "cat", "/etc/shadow"); err == nil || !strings.Contains(err.Error(), "unknown command") {
-		t.Fatalf("pbcwm ran something other than pbcwm-runner: %v", err)
+		t.Fatalf("pbcm ran something other than pbcm-runner: %v", err)
 	}
 	if _, err := m.Check(ctx, c.ID); err != nil {
 		t.Fatal(err)
 	}
 
 	// Setting up again (repair) works and leaves one key line.
-	task, err = m.Repair(c.ID, Login{User: os.Getenv("PBCWM_IT_USER"), Password: os.Getenv("PBCWM_IT_PASSWORD")}, "")
+	task, err = m.Repair(c.ID, Login{User: os.Getenv("PBCM_IT_USER"), Password: os.Getenv("PBCM_IT_PASSWORD")}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestRealClient(t *testing.T) {
 	}
 	t.Logf("uninstall:\n%s", out)
 	if _, err := m.runnerCommand(ctx, c, "detect"); err == nil {
-		t.Fatal("pbcwm still works after uninstall")
+		t.Fatal("pbcm still works after uninstall")
 	}
 }
 

@@ -1,19 +1,19 @@
 #!/bin/bash
-# Sets this machine up as a Proxmox Backup Client Web Manager client. The
-# server uploads this script with pbcwm-runner and the server's public key
+# Sets this machine up as a PBC Manager client. The
+# server uploads this script with pbcm-runner and the server's public key
 # into a temporary folder, runs it as root, and it deletes the folder when done.
 #
-# It installs proxmox-backup-client if missing, creates the pbcwm account
-# (signs in only with the server's key, and can only run pbcwm-runner), and
-# installs pbcwm-runner with a sudo rule allowing that one program.
+# It installs proxmox-backup-client if missing, creates the pbcm account
+# (signs in only with the server's key, and can only run pbcm-runner), and
+# installs pbcm-runner with a sudo rule allowing that one program.
 set -euo pipefail
 exec 2>&1
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 trap 'rm -rf "$DIR"' EXIT
-RUNNER=/usr/local/lib/pbcwm/pbcwm-runner
-ACCOUNT=pbcwm
-MARKER='command="sudo -n /usr/local/lib/pbcwm/pbcwm-runner ssh"'
+RUNNER=/usr/local/lib/pbcm/pbcm-runner
+ACCOUNT=pbcm
+MARKER='command="sudo -n /usr/local/lib/pbcm/pbcm-runner ssh"'
 
 step() { echo "==> $*"; }
 fail() { echo "ERROR: $*"; exit 1; }
@@ -60,10 +60,10 @@ else
     fail "proxmox-backup-client can only be installed automatically on apt-based systems. Install Proxmox's static client by hand, then use Repair."
   step "Installing proxmox-backup-client"
   apt_install ca-certificates curl
-  KEYRING=/usr/share/keyrings/pbcwm-proxmox-archive-keyring.gpg
+  KEYRING=/usr/share/keyrings/pbcm-proxmox-archive-keyring.gpg
   case "$OS_ID:$OS_CODENAME" in
     debian:trixie|debian:bookworm) SUITE="$OS_CODENAME" PKG=proxmox-backup-client ;;
-    debian:bullseye) SUITE=bullseye PKG=proxmox-backup-client KEYRING=/usr/share/keyrings/pbcwm-proxmox-release-bullseye.gpg ;;
+    debian:bullseye) SUITE=bullseye PKG=proxmox-backup-client KEYRING=/usr/share/keyrings/pbcm-proxmox-release-bullseye.gpg ;;
     *)
       SUITE=bookworm PKG=proxmox-backup-client-static
       step "Proxmox has no package made for $OS_PRETTY, so using its static build"
@@ -77,7 +77,7 @@ else
       136673be77aba35dcce385b28737689ad64fd785a797e57897589aed08db6e45
   fi
   echo "deb [signed-by=$KEYRING] http://download.proxmox.com/debian/pbs-client $SUITE main" \
-    > /etc/apt/sources.list.d/pbcwm-pbs-client.list
+    > /etc/apt/sources.list.d/pbcm-pbs-client.list
   APT_UPDATED=0
   apt_install "$PKG"
   step "Installed $(proxmox-backup-client version 2>/dev/null | head -n1)"
@@ -86,11 +86,11 @@ fi
 # ---- sudo ------------------------------------------------------------------
 command -v sudo >/dev/null 2>&1 || { step "Installing sudo"; apt_install sudo; }
 grep -Eq '^[[:space:]]*[@#]includedir[[:space:]]+/etc/sudoers\.d' /etc/sudoers ||
-  fail "/etc/sudoers doesn't read /etc/sudoers.d, so the pbcwm sudo rule wouldn't take effect. Add \"@includedir /etc/sudoers.d\" to it."
+  fail "/etc/sudoers doesn't read /etc/sudoers.d, so the pbcm sudo rule wouldn't take effect. Add \"@includedir /etc/sudoers.d\" to it."
 
-# ---- the pbcwm account -------------------------------------------------------
+# ---- the pbcm account -------------------------------------------------------
 if ! id "$ACCOUNT" >/dev/null 2>&1; then
-  useradd --system --user-group --create-home --home-dir /var/lib/pbcwm --shell /bin/sh "$ACCOUNT"
+  useradd --system --user-group --create-home --home-dir /var/lib/pbcm --shell /bin/sh "$ACCOUNT"
   step "Created the $ACCOUNT account"
 fi
 # A shell is needed to run the forced command; "*" means no password at all
@@ -104,22 +104,22 @@ touch "$AK"
 chown "$ACCOUNT:$ACCOUNT" "$AK.new"
 chmod 600 "$AK.new"
 mv -f "$AK.new" "$AK"
-step "The $ACCOUNT account signs in only with this server's key and can only run pbcwm-runner"
+step "The $ACCOUNT account signs in only with this server's key and can only run pbcm-runner"
 
-# ---- pbcwm-runner and its sudo rule --------------------------------------------
+# ---- pbcm-runner and its sudo rule --------------------------------------------
 install -d -o root -g root -m 755 "$(dirname "$RUNNER")"
-install -o root -g root -m 755 "$DIR/pbcwm-runner" "$RUNNER"
-step "Installed pbcwm-runner $("$RUNNER" version)"
+install -o root -g root -m 755 "$DIR/pbcm-runner" "$RUNNER"
+step "Installed pbcm-runner $("$RUNNER" version)"
 
 cat > "$DIR/sudoers" <<EOF
-# Managed by Proxmox Backup Client Web Manager.
-# The $ACCOUNT account may run pbcwm-runner as root, and nothing else.
+# Managed by PBC Manager.
+# The $ACCOUNT account may run pbcm-runner as root, and nothing else.
 Defaults:$ACCOUNT !requiretty
 Defaults:$ACCOUNT env_keep += "SSH_ORIGINAL_COMMAND"
 $ACCOUNT ALL=(root) NOPASSWD: $RUNNER
 EOF
 visudo -cf "$DIR/sudoers" >/dev/null || fail "The sudo rule didn't pass visudo's check, so it wasn't installed."
-install -o root -g root -m 440 "$DIR/sudoers" /etc/sudoers.d/pbcwm
+install -o root -g root -m 440 "$DIR/sudoers" /etc/sudoers.d/pbcm
 
-install -d -o root -g root -m 700 /etc/pbcwm/client /var/lib/pbcwm/client
+install -d -o root -g root -m 700 /etc/pbcm/client /var/lib/pbcm/client
 step "Setup finished"

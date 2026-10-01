@@ -1,7 +1,7 @@
 // Package clients manages the machines the server backs up: adding them over
 // SSH (as root, once), checking them, browsing their folders, repairing and
-// removing them. After setup the server only signs in as the limited pbcwm
-// account, whose key can run nothing but pbcwm-runner.
+// removing them. After setup the server only signs in as the limited pbcm
+// account, whose key can run nothing but pbcm-runner.
 package clients
 
 import (
@@ -22,9 +22,9 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/runner"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/sshx"
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/store"
+	"github.com/bradyloveland/pbcmanager/internal/runner"
+	"github.com/bradyloveland/pbcmanager/internal/sshx"
+	"github.com/bradyloveland/pbcmanager/internal/store"
 )
 
 //go:embed setup.sh
@@ -42,7 +42,7 @@ type Manager struct {
 	busy   map[string]bool
 }
 
-// New returns a manager. runnerPath is the pbcwm-runner executable to send
+// New returns a manager. runnerPath is the pbcm-runner executable to send
 // to clients (linux/amd64).
 func New(st *store.Store, id *sshx.Identity, runnerPath string) *Manager {
 	return &Manager{store: st, identity: id, runnerPath: runnerPath, timeout: 15 * time.Second,
@@ -224,7 +224,7 @@ func (m *Manager) release(id string) {
 func (m *Manager) startSetup(c *store.Client, login Login, key ssh.PublicKey, kind string) (*Task, error) {
 	runnerBin, err := os.ReadFile(m.runnerPath)
 	if err != nil {
-		return nil, fmt.Errorf("this server's copy of pbcwm-runner is missing (%s); reinstall the server", m.runnerPath)
+		return nil, fmt.Errorf("this server's copy of pbcm-runner is missing (%s); reinstall the server", m.runnerPath)
 	}
 	if !m.claim(c.ID) {
 		return nil, inputErr("Something is already being done on %s. Wait for it to finish.", c.Name)
@@ -253,7 +253,7 @@ func (m *Manager) startSetup(c *store.Client, login Login, key ssh.PublicKey, ki
 	return t, nil
 }
 
-var tmpDirRE = regexp.MustCompile(`^/[A-Za-z0-9._/\-]+/pbcwm-setup\.[A-Za-z0-9]+$`)
+var tmpDirRE = regexp.MustCompile(`^/[A-Za-z0-9._/\-]+/pbcm-setup\.[A-Za-z0-9]+$`)
 
 func (m *Manager) setup(t *Task, c *store.Client, login Login, key ssh.PublicKey, runnerBin []byte) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
@@ -295,7 +295,7 @@ func (m *Manager) setup(t *Task, c *store.Client, login Login, key ssh.PublicKey
 		t.Logf("Signed in as root.")
 	}
 
-	out, _, code, err := sshx.Output(conn, "umask 077 && mktemp -d /tmp/pbcwm-setup.XXXXXXXX", nil)
+	out, _, code, err := sshx.Output(conn, "umask 077 && mktemp -d /tmp/pbcm-setup.XXXXXXXX", nil)
 	dir := strings.TrimSpace(out)
 	if err != nil || code != 0 || !tmpDirRE.MatchString(dir) {
 		return errors.New("couldn't create a temporary folder on the client")
@@ -308,11 +308,11 @@ func (m *Manager) setup(t *Task, c *store.Client, login Login, key ssh.PublicKey
 		}
 		return nil
 	}
-	t.Logf("Copying pbcwm-runner and the setup script…")
+	t.Logf("Copying pbcm-runner and the setup script…")
 	for _, f := range []struct {
 		name string
 		data []byte
-	}{{"pbcwm-runner", runnerBin}, {"key.pub", []byte(m.identity.AuthorizedKey + "\n")}, {"setup.sh", setupScript}} {
+	}{{"pbcm-runner", runnerBin}, {"key.pub", []byte(m.identity.AuthorizedKey + "\n")}, {"setup.sh", setupScript}} {
 		if err := upload(f.name, f.data); err != nil {
 			cleanup()
 			return err
@@ -340,11 +340,11 @@ func (m *Manager) setup(t *Task, c *store.Client, login Login, key ssh.PublicKey
 	}
 	conn.Close()
 
-	t.Logf("Checking that the server can sign in as pbcwm…")
+	t.Logf("Checking that the server can sign in as pbcm…")
 	c.HostKey = sshx.FormatKey(key)
 	c.OfferedKey = ""
 	if err := m.refresh(ctx, c); err != nil {
-		return fmt.Errorf("setup finished, but signing in as pbcwm failed: %s. If the client's SSH settings limit who can sign in (AllowUsers or AllowGroups), add pbcwm", err)
+		return fmt.Errorf("setup finished, but signing in as pbcm failed: %s. If the client's SSH settings limit who can sign in (AllowUsers or AllowGroups), add pbcm", err)
 	}
 	t.Logf(fmt.Sprintf("Ready: %s, proxmox-backup-client %s.", c.OSPretty, orNone(c.ClientVersion)))
 	return nil
@@ -357,7 +357,7 @@ func orNone(s string) string {
 	return s
 }
 
-// runnerCommand signs in as pbcwm and runs a pbcwm-runner command.
+// runnerCommand signs in as pbcm and runs a pbcm-runner command.
 func (m *Manager) runnerCommand(ctx context.Context, c *store.Client, words ...string) (string, error) {
 	key, err := sshx.ParseKey(c.HostKey)
 	if err != nil {
@@ -376,17 +376,17 @@ func (m *Manager) runnerCommand(ctx context.Context, c *store.Client, words ...s
 	if code != 0 {
 		msg := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(stderr), "Error:"))
 		if msg == "" {
-			msg = fmt.Sprintf("pbcwm-runner exited with code %d", code)
+			msg = fmt.Sprintf("pbcm-runner exited with code %d", code)
 		}
 		if strings.Contains(stderr, "sudo:") {
-			msg = "the pbcwm sudo rule is missing or broken on the client. Use Repair"
+			msg = "the pbcm sudo rule is missing or broken on the client. Use Repair"
 		}
 		return "", errors.New(msg)
 	}
 	return stdout, nil
 }
 
-// refresh signs in as pbcwm, reads the client's details and saves them with
+// refresh signs in as pbcm, reads the client's details and saves them with
 // status ready, or records why it couldn't.
 func (m *Manager) refresh(ctx context.Context, c *store.Client) error {
 	out, err := m.runnerCommand(ctx, c, "detect")
@@ -403,7 +403,7 @@ func (m *Manager) refresh(ctx context.Context, c *store.Client) error {
 	}
 	var info runner.Info
 	if err := json.Unmarshal([]byte(out), &info); err != nil {
-		return fmt.Errorf("pbcwm-runner sent an unexpected reply")
+		return fmt.Errorf("pbcm-runner sent an unexpected reply")
 	}
 	c.OSID, c.OSPretty, c.OSCodename, c.Arch = info.OSID, info.OSPretty, info.OSCodename, info.Arch
 	c.Hostname, c.SystemdVersion, c.ClientVersion, c.RunnerVersion = info.Hostname, info.SystemdVersion, info.ClientVersion, info.RunnerVersion
@@ -441,7 +441,7 @@ func (m *Manager) Browse(ctx context.Context, id, path string) (*runner.Listing,
 	}
 	var l runner.Listing
 	if err := json.Unmarshal([]byte(out), &l); err != nil {
-		return nil, fmt.Errorf("pbcwm-runner sent an unexpected reply")
+		return nil, fmt.Errorf("pbcm-runner sent an unexpected reply")
 	}
 	return &l, nil
 }

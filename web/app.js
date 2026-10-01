@@ -11,7 +11,7 @@ const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "
 let session = null, routeToken = 0, pendingTimer = null;
 
 async function api(method, path, body) {
-  const opts = {method, headers: {"X-PBCWM": "1"}, credentials: "same-origin"};
+  const opts = {method, headers: {"X-PBCM": "1"}, credentials: "same-origin"};
   if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
   let res;
   try { res = await fetch("api" + path, opts); }
@@ -43,12 +43,12 @@ function showGate(which) {
   $$("#gate [data-error]").forEach(e => e.classList.add("hidden"));
   const name = session ? session.server_name : "";
   if (which === "setup") {
-    $("#gate-title").textContent = "Set up PBC Web Manager";
+    $("#gate-title").textContent = "Set up PBC Manager";
     $("#gate-sub").textContent = name ? `Finish setting up the server on ${name}.` : "";
     $("#setup-form").classList.remove("hidden");
     setTimeout(() => $("#setup-form [name=code]").focus(), 0);
   } else {
-    $("#gate-title").textContent = "PBC Web Manager";
+    $("#gate-title").textContent = "PBC Manager";
     $("#gate-sub").textContent = name ? `Sign in to manage backups from ${name}.` : "";
     loginTicket = null;
     $("#login-form").classList.remove("hidden");
@@ -75,7 +75,7 @@ function setRecoveryMode(on) {
   inp.placeholder = on ? "xxxxx-xxxxx" : "";
   $("#totp-label").textContent = on ? "Recovery code" : "Verification code";
   $("#totp-help").textContent = on ? "Enter one of the recovery codes you saved when you set up two-step verification. Each code works once."
-    : "Open your authenticator app and enter the 6-digit code for PBC Web Manager.";
+    : "Open your authenticator app and enter the 6-digit code for PBC Manager.";
   $("#use-recovery").textContent = on ? "Use my authenticator app instead" : "Use a recovery code instead";
   $("#totp-form [data-error]").classList.add("hidden");
   inp.focus();
@@ -158,7 +158,7 @@ function showApp() {
   $("#app").classList.remove("hidden");
   $("#server-name").textContent = session.server_name;
   $("#version").textContent = `Version ${session.version}`;
-  document.title = `${session.server_name} · PBC Web Manager`;
+  document.title = `${session.server_name} · PBC Manager`;
   drawPendingBanner();
   route();
 }
@@ -166,7 +166,7 @@ function showApp() {
 function render(html) { $("#view").innerHTML = html; }
 
 const routes = [
-  [/^#\/overview$/, "overview", viewOverview],
+  [/^#\/(?:dashboard|overview)$/, "dashboard", viewDashboard],
   [/^#\/clients$/, "clients", viewClients],
   [/^#\/clients\/new$/, "clients", viewClientNew],
   [/^#\/clients\/(\w+)$/, "clients", viewClient],
@@ -178,9 +178,9 @@ const routes = [
 async function route() {
   if (!session || !session.user) return;
   const token = ++routeToken;
-  const hash = location.hash || "#/overview";
+  const hash = location.hash || "#/dashboard";
   const match = routes.find(([re]) => re.test(hash));
-  if (!match) { location.hash = "#/overview"; return; }
+  if (!match) { location.hash = "#/dashboard"; return; }
   const [re, nav, fn] = match;
   $$(".nav a").forEach(a => a.dataset.nav === nav ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"));
   render(`<div class="loading">Loading…</div>`);
@@ -223,21 +223,23 @@ function wirePendingButtons(box, p) {
   };
 }
 
-/* ---------- overview ---------- */
-async function viewOverview(token) {
-  const {clients} = await api("GET", "/clients");
+/* ---------- dashboard ---------- */
+async function viewDashboard(token) {
+  const [{clients}, acct] = await Promise.all([api("GET", "/clients"), api("GET", "/account")]);
   if (token !== routeToken) return;
+  // Only nudge about two-step verification while it's off.
+  const twoStep = acct.totp_enabled ? "" : `<div class="banner warn"><b>Two-step verification is off.</b> Anyone with your password can manage every client's backups. <a href="#/account">Turn it on</a></div>`;
   if (!clients.length) {
-    render(`<div class="health"><span class="dot"></span><h1>No clients yet</h1></div>
+    render(`<div class="health"><span class="dot"></span><h1>No clients yet</h1></div>${twoStep}
       <div class="panel empty"><h2>Add your first client</h2>
         <p>A client is a Linux machine whose folders you want to back up. The server connects to it over SSH once to set it up; after that the client backs up on its own.</p>
-        <div class="btnrow"><a class="btn primary" href="#/clients/new">Add a client</a><a class="btn" href="#/account">Turn on two-step verification</a></div></div>`);
+        <a class="btn primary" href="#/clients/new">Add a client</a></div>`);
     return;
   }
   const trouble = clients.filter(c => c.status !== "ready" && c.status !== "setting-up");
   const head = trouble.length ? (trouble.length === 1 ? `${trouble[0].name} needs attention` : `${trouble.length} clients need attention`)
     : clients.length === 1 ? "Your client is ready" : `All ${clients.length} clients are ready`;
-  render(`<div class="health ${trouble.length ? "bad" : "ok"}"><span class="dot"></span><h1>${esc(head)}</h1></div>
+  render(`<div class="health ${trouble.length ? "bad" : "ok"}"><span class="dot"></span><h1>${esc(head)}</h1></div>${twoStep}
     <p class="lede">Backup jobs and their results arrive in the next development milestone.</p>
     ${clientsTable(clients)}`);
   bindRowLinks();
@@ -345,7 +347,7 @@ async function viewClientNew(token) {
   const st = {name: "", address: "", port: 22, probe: null};
   const steps = ["Address", "Host key", "Sign in", "Set up"];
   const frame = (n, body) => render(`<a class="back" href="#/clients">‹ Clients</a><h1>Add a client</h1>
-    <p class="lede">The server signs in once as root (or a sudo user) to install the backup client if needed and create a limited <span class="mono">pbcwm</span> account. After that it only uses that account.</p>
+    <p class="lede">The server signs in once as root (or a sudo user) to install the backup client if needed and create a limited <span class="mono">pbcm</span> account. After that it only uses that account.</p>
     <ol class="wizard-steps">${steps.map((s, i) => `<li class="${i === n ? "on" : i < n ? "done" : ""}">${i + 1}. ${s}</li>`).join("")}</ol>
     <div class="panel">${body}</div>`);
 
@@ -420,7 +422,7 @@ async function viewClient(id, token) {
     ${banner}
     <div class="cols"><div class="stack">
       <div class="panel" id="c-task" ${task && !task.done ? "" : "hidden"}><h2>Setup</h2></div>
-      <div class="panel"><h2>Repair</h2><p class="hint m-0 mb-14">Runs setup again as root: reinstalls pbcwm-runner, the pbcwm account and its sudo rule, and the backup client if it's missing. Use it after reinstalling the client, if its host key changed, or if something was removed by hand.</p>
+      <div class="panel"><h2>Repair</h2><p class="hint m-0 mb-14">Runs setup again as root: reinstalls pbcm-runner, the pbcm account and its sudo rule, and the backup client if it's missing. Use it after reinstalling the client, if its host key changed, or if something was removed by hand.</p>
         <button class="btn" id="c-repair">Repair ${esc(c.name)}</button><div id="c-repair-flow"></div></div>
       <div class="panel"><h2>Remove</h2><p class="hint m-0 mb-14">Stops managing this client.</p>
         <button class="btn danger" id="c-remove">Remove ${esc(c.name)}</button><div id="c-remove-flow"></div></div>
@@ -431,7 +433,7 @@ async function viewClient(id, token) {
       <dt>System</dt><dd>${esc(c.os_pretty || "—")}${c.arch ? `, ${esc(c.arch)}` : ""}</dd>
       <dt>systemd</dt><dd>${esc(c.systemd_version || "—")}</dd>
       <dt>Backup client</dt><dd>${c.client_version ? `proxmox-backup-client ${esc(c.client_version)}` : `<span class="muted">Not found</span>`}</dd>
-      <dt>pbcwm-runner</dt><dd>${esc(c.runner_version || "—")}</dd>
+      <dt>pbcm-runner</dt><dd>${esc(c.runner_version || "—")}</dd>
       <dt>Last contact</dt><dd>${esc(ago(c.last_contact))}</dd>
       <dt>SSH host key</dt><dd class="mono break">${esc(c.host_key_fingerprint)}</dd>
       ${c.server_here ? `<dt>Note</dt><dd>This server runs on this machine too.</dd>` : ""}
@@ -448,7 +450,7 @@ async function viewClient(id, token) {
       route();
     } catch (ex) { toast(ex.message, "bad"); e.target.disabled = false; }
   };
-  $("#c-browse").onclick = () => pickFolder(id, "/srv", false);
+  $("#c-browse").onclick = () => pickFolder(id, "/", false);
 
   $("#c-repair").onclick = async () => {
     $("#c-repair").classList.add("hidden");
@@ -485,7 +487,7 @@ async function viewClient(id, token) {
     $("#c-remove-flow").innerHTML = `<form class="subform" id="xf" novalidate>
       <div class="choice">
         <label class="check"><input type="radio" name="how" value="uninstall" checked><span><b>Remove everything this server put on the client</b><br>
-          <span class="hint">The pbcwm account, its sudo rule, pbcwm-runner and the client's settings. proxmox-backup-client stays installed, and backups already on PBS aren't touched.</span></span></label>
+          <span class="hint">The pbcm account, its sudo rule, pbcm-runner and the client's settings. proxmox-backup-client stays installed, and backups already on PBS aren't touched.</span></span></label>
         <label class="check"><input type="radio" name="how" value="list"><span><b>Only remove it from this list</b><br><span class="hint">For a client that's gone or can't be reached. Anything on it stays as it is.</span></span></label>
       </div>
       <label class="check"><input type="checkbox" name="keep" checked><span>Keep its run history on the client</span></label>
@@ -556,12 +558,12 @@ async function viewSettings(token) {
       <div class="formfoot"><button class="btn primary" type="submit">Save settings</button></div>
     </form>
     <div class="panel" id="netpanel"></div>
-    <div class="panel"><h2>SSH</h2><p class="hint m-0 mb-14">The key this server signs in to clients with. Setup adds it to each client's pbcwm account automatically; you only need it here if you'd rather add it for root by hand before adding a client.</p>
+    <div class="panel"><h2>SSH</h2><p class="hint m-0 mb-14">The key this server signs in to clients with. Setup adds it to each client's pbcm account automatically; you only need it here if you'd rather add it for root by hand before adding a client.</p>
       <dl class="kv"><dt>Public key</dt><dd><div class="keybox">${esc(ssh.public_key)}</div><button class="btn small mt-12" id="copy-key">Copy</button></dd>
       <dt>Fingerprint</dt><dd class="mono">${esc(ssh.fingerprint)}</dd></dl></div>
     <div class="panel"><h2>About</h2><dl class="kv">
       <dt>Version</dt><dd>${esc(session.version)}</dd>
-      <dt>Project</dt><dd><a href="https://github.com/bradyloveland/proxmoxbackupclientwebmanager" rel="noopener noreferrer" target="_blank">github.com/bradyloveland/proxmoxbackupclientwebmanager</a></dd>
+      <dt>Project</dt><dd><a href="https://github.com/bradyloveland/pbcmanager" rel="noopener noreferrer" target="_blank">github.com/bradyloveland/pbcmanager</a></dd>
       <dt>Updates</dt><dd class="muted">Updating from this page arrives in a later development milestone.</dd>
     </dl></div>`);
 
@@ -710,12 +712,12 @@ function codesBlock(codes) {
     <div class="btnrow"><button type="button" class="btn small" id="codes-copy">Copy codes</button><button type="button" class="btn small" id="codes-dl">Download as a text file</button><button type="button" class="btn primary small" id="codes-done">I've saved them</button></div>`;
 }
 function bindCodes(codes, done) {
-  const text = `PBC Web Manager recovery codes for ${session.server_name}\nEach code can be used once.\n\n${codes.join("\n")}\n`;
+  const text = `PBC Manager recovery codes for ${session.server_name}\nEach code can be used once.\n\n${codes.join("\n")}\n`;
   $("#codes-copy").onclick = async () => { try { await navigator.clipboard.writeText(text); toast("Recovery codes copied."); } catch (_) { toast("Couldn't copy. Select the codes and copy them by hand.", "bad"); } };
   $("#codes-dl").onclick = () => {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([text], {type: "text/plain"}));
-    a.download = `pbcwm-recovery-codes-${session.server_name}.txt`;
+    a.download = `pbcm-recovery-codes-${session.server_name}.txt`;
     document.body.append(a); a.click(); a.remove();
   };
   $("#codes-done").onclick = done;
@@ -746,10 +748,10 @@ async function viewAccount(token) {
       <div class="formfoot"><button class="btn primary" type="submit">Change password</button></div>
     </form>
     <div class="panel"><h2>Locked out?</h2><p class="hint m-0 mb-14">These commands run on the server itself, for when the web UI can't help.</p><dl class="kv">
-      <dt>Forgot the password</dt><dd class="mono">sudo pbcwm passwd</dd>
-      <dt>Lost the authenticator</dt><dd class="mono">sudo pbcwm totp-reset</dd>
-      <dt>Can't reach the web UI</dt><dd><span class="mono">sudo pbcwm network --reset</span> <span class="muted">(every interface, port 8099, self-signed HTTPS)</span></dd>
-      <dt>Service log</dt><dd class="mono">journalctl -u pbcwm</dd>
+      <dt>Forgot the password</dt><dd class="mono">sudo pbcm passwd</dd>
+      <dt>Lost the authenticator</dt><dd class="mono">sudo pbcm totp-reset</dd>
+      <dt>Can't reach the web UI</dt><dd><span class="mono">sudo pbcm network --reset</span> <span class="muted">(every interface, port 8099, self-signed HTTPS)</span></dd>
+      <dt>Service log</dt><dd class="mono">journalctl -u pbcm</dd>
     </dl></div>`);
 
   const box = $("#twofa");
@@ -859,7 +861,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   } catch (ex) {
     const f = $("#fatal");
     f.className = "banner bad";
-    f.textContent = `Can't reach the PBC Web Manager service: ${ex.message}`;
+    f.textContent = `Can't reach the PBC Manager service: ${ex.message}`;
     return;
   }
   if (session.setup_needed) showGate("setup");

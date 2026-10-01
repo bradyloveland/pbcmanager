@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bradyloveland/proxmoxbackupclientwebmanager/internal/sshx"
+	"github.com/bradyloveland/pbcmanager/internal/sshx"
 )
 
 func testEnv(t *testing.T) (*Env, *bytes.Buffer, *[]string) {
@@ -26,7 +26,7 @@ func testEnv(t *testing.T) (*Env, *bytes.Buffer, *[]string) {
 		case "proxmox-backup-client":
 			return "client version: 3.4.1\n", nil
 		case "getent":
-			return "pbcwm:x:999:999::" + "/var/lib/pbcwm" + ":/bin/sh\n", nil
+			return "pbcm:x:999:999::" + "/var/lib/pbcm" + ":/bin/sh\n", nil
 		}
 		return "", nil
 	}}
@@ -127,17 +127,17 @@ func TestBrowse(t *testing.T) {
 
 func TestUninstallRemovesOnlyOurFiles(t *testing.T) {
 	env, out, calls := testEnv(t)
-	key := KeyMarker + " ssh-ed25519 AAAA pbcwm@server"
-	write(t, env.path("/var/lib/pbcwm/.ssh/authorized_keys"), "ssh-ed25519 BBBB someone-else\n"+key+"\n")
+	key := KeyMarker + " ssh-ed25519 AAAA pbcm@server"
+	write(t, env.path("/var/lib/pbcm/.ssh/authorized_keys"), "ssh-ed25519 BBBB someone-else\n"+key+"\n")
 	write(t, env.path(SudoersPath), "rule")
 	write(t, env.path(Path), "binary")
 	write(t, env.path(ConfigDir+"/jobs/a.json"), "{}")
 	write(t, env.path(StateDir+"/runs/1/log"), "log")
-	write(t, env.path("/etc/pbcwm/other"), "not ours")
+	write(t, env.path("/etc/pbcm/other"), "not ours")
 	if err := Uninstall(env, true); err != nil {
 		t.Fatal(err)
 	}
-	keys, _ := os.ReadFile(env.path("/var/lib/pbcwm/.ssh/authorized_keys"))
+	keys, _ := os.ReadFile(env.path("/var/lib/pbcm/.ssh/authorized_keys"))
 	if strings.Contains(string(keys), "AAAA") || !strings.Contains(string(keys), "BBBB") {
 		t.Fatalf("authorized_keys: %q", keys)
 	}
@@ -149,11 +149,11 @@ func TestUninstallRemovesOnlyOurFiles(t *testing.T) {
 	if _, err := os.Stat(env.path(StateDir + "/runs/1/log")); err != nil {
 		t.Error("history should be kept with --keep-history")
 	}
-	if _, err := os.Stat(env.path("/etc/pbcwm/other")); err != nil {
+	if _, err := os.Stat(env.path("/etc/pbcm/other")); err != nil {
 		t.Error("unrelated files must stay")
 	}
 	last := (*calls)[len(*calls)-1]
-	if !strings.HasPrefix(last, "systemd-run") || !strings.Contains(last, "userdel pbcwm") || strings.Contains(last, "rm -rf") {
+	if !strings.HasPrefix(last, "systemd-run") || !strings.Contains(last, "userdel pbcm") || strings.Contains(last, "rm -rf") {
 		t.Fatalf("account removal: %s", last)
 	}
 	_ = out

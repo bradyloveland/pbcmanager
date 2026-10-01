@@ -6,22 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-Version 2: a rewrite in Go, renamed Proxmox Backup Client Web Manager. Work in progress; see docs/design-v2.md.
+Version 2: a rewrite in Go, renamed PBC Manager. Work in progress; see docs/design-v2.md.
 
 ### Added
-- One self-contained `pbcwm` program for Linux x86-64 and ARM64, with the web UI built in and settings in an SQLite database.
-- First-run setup in the browser, protected by a one-time setup code that the installer prints (`sudo pbcwm setup-code` shows it again).
+- One self-contained `pbcm` program for Linux x86-64 and ARM64, with the web UI built in and settings in an SQLite database.
+- First-run setup in the browser, protected by a one-time setup code that the installer prints (`sudo pbcm setup-code` shows it again).
 - Settings page covering everything that used to need `pbs-manager configure` or `config.json`: server name, sign-out time, listen address, port, HTTPS, trusted reverse proxies and base path.
 - Network changes that could lock you out are tried first and kept only once you confirm them from the new address. Otherwise they're undone after about two minutes.
 - HTTPS with a self-signed certificate (created by the server, no openssl needed), your own uploaded certificate, or off. Plain `http://` visits are redirected to `https://` on the same port.
 - Sign-ins survive restarts and upgrades. Sessions are stored as hashes, and the two-step secret is encrypted on disk.
-- `pbcwm network --reset` puts the network settings back to the defaults if the web UI can't be reached.
-- Installer for Debian 12/13, including LXC containers. It runs the service as an unprivileged `pbcwm` user with systemd sandboxing, and falls back gracefully in containers without nesting.
+- `pbcm network --reset` puts the network settings back to the defaults if the web UI can't be reached.
+- Installer for Debian 12/13, including LXC containers. It runs the service as an unprivileged `pbcm` user with systemd sandboxing, and falls back gracefully in containers without nesting.
 
 - **Clients** (milestone 2):
   - **Adding a client:** enter its address, check its SSH host key fingerprint, and sign in once as root or a sudo user. The password is used once and never saved.
   - **Setup:** installs `proxmox-backup-client` from Proxmox if it's missing. Debian 13, 12 and 11 get the regular package; Debian 10, Ubuntu and other apt-based systems get the static build. The Proxmox signing keys are checked against built-in checksums.
-  - **The `pbcwm` account:** setup creates it so it signs in only with the server's key and can run nothing but `pbcwm-runner`, through a forced command and a sudo rule checked with `visudo`.
+  - **The `pbcm` account:** setup creates it so it signs in only with the server's key and can run nothing but `pbcm-runner`, through a forced command and a sudo rule checked with `visudo`.
   - **Host key pinning:** a client whose key changes is blocked until you compare the new key and repair it.
   - **Managing a client:** client details, Check now, a folder browser, Repair (runs setup again), and Remove (cleans everything up, or just takes the client off the list).
   - **The server's SSH key** is shown under Settings.
@@ -30,6 +30,9 @@ Version 2: a rewrite in Go, renamed Proxmox Backup Client Web Manager. Work in p
 - The UI runs under a strict Content Security Policy with no inline scripts or styles.
 - UI files are cache-busted by content, so browsers never run a stale script after an upgrade.
 - The layout no longer overflows sideways on very narrow screens.
+- Renamed to **PBC Manager** (program `pbcm`, repository `bradyloveland/pbcmanager`).
+- The Overview page is now the **Dashboard**. It suggests two-step verification only while it's off.
+- Folder browsing starts at `/`.
 
 ### Kept from 1.x
 - Two-step verification with QR enrolment, recovery codes and replay protection.
