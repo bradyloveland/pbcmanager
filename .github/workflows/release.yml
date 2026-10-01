@@ -24,8 +24,18 @@ jobs:
             echo "::error::Tag ${GITHUB_REF_NAME} doesn't match VERSION ${version}"
             exit 1
           fi
-      - name: Build release archives
-        run: make dist
+      - name: Build and sign release archives
+        env:
+          PBCM_SIGNING_KEY: ${{ secrets.PBCM_SIGNING_KEY }}
+        run: |
+          if [ -z "$PBCM_SIGNING_KEY" ]; then
+            echo "::error::The PBCM_SIGNING_KEY secret isn't set, so the release can't be signed"
+            exit 1
+          fi
+          make dist
+          for f in dist/*.tar.gz; do
+            tar -tzf "$f" | grep -q '/MANIFEST.sig$' || { echo "::error::$f isn't signed"; exit 1; }
+          done
       - name: Release notes from CHANGELOG.md
         run: scripts/release-notes.sh "${GITHUB_REF_NAME#v}" > notes.md
       - name: Publish

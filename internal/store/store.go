@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -319,4 +320,14 @@ func (s *Store) RawAdminTOTP() (string, error) {
 	var v string
 	err := s.db.QueryRow(`SELECT totp_secret FROM admin WHERE id = 1`).Scan(&v)
 	return v, err
+}
+
+// Backup writes a consistent copy of the database to path, which must not
+// exist yet. It's safe while the server is running.
+func (s *Store) Backup(path string) error {
+	_, err := s.db.Exec(`VACUUM INTO ?`, path)
+	if err == nil {
+		err = os.Chmod(path, 0o600)
+	}
+	return err
 }

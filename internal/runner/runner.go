@@ -131,6 +131,8 @@ func Dispatch(env *Env, args []string) error {
 		return Uninstall(env, keep)
 	case "apply":
 		return Apply(env, env.Stdin)
+	case "self-update":
+		return SelfUpdate(env, env.Stdin)
 	case "measure":
 		if err := measureUsage(args); err != nil {
 			return err

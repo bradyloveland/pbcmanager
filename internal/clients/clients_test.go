@@ -3,6 +3,8 @@ package clients
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"github.com/bradyloveland/pbcmanager/internal/backups"
 	"github.com/bradyloveland/pbcmanager/internal/bundle"
 	"github.com/bradyloveland/pbcmanager/internal/clients/clienttest"
+	"github.com/bradyloveland/pbcmanager/internal/release"
 	"github.com/bradyloveland/pbcmanager/internal/runner"
 	"github.com/bradyloveland/pbcmanager/internal/secret"
 	"github.com/bradyloveland/pbcmanager/internal/sshx"
@@ -497,5 +500,52 @@ func TestFolderSizesAreMeasuredAndCollected(t *testing.T) {
 	js := sum.Jobs[j.ID]
 	if js.FolderComplete || len(js.FolderErrors) != 1 || !strings.Contains(js.FolderErrors[0], "not found") {
 		t.Fatalf("missing folder: %+v", js)
+	}
+}
+
+func TestRunnerIsUpdatedFromASignedRelease(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	saved := release.Keys
+	release.Keys = []release.Key{{ID: "test", Pub: pub}}
+	t.Cleanup(func() { release.Keys = saved })
+
+	h := newHarness(t)
+	ctx := context.Background()
+	c, v := h.add(t, Login{User: "root", Password: rootPW})
+	if !v.OK {
+		t.Fatalf("setup: %+v", v)
+	}
+	h.m.SyncClient(ctx, c.ID)
+	if s := h.m.RunnerState(c.ID); s != RunnerCurrent {
+		t.Fatalf("after setup the runner matches: %s", s)
+	}
+
+	// The server is updated to a new release; an unsigned copy can't be pushed.
+	newRunner := []byte("RUNNER-BINARY-2")
+	os.WriteFile(h.m.runnerPath, newRunner, 0o755)
+	h.m.runnerCache = nil
+	h.m.SyncClient(ctx, c.ID)
+	if s := h.m.RunnerState(c.ID); s != RunnerRepair {
+		t.Fatalf("unsigned server runner: %s", s)
+	}
+	if b, _ := os.ReadFile(h.host.Path(runner.Path)); string(b) != "RUNNER-BINARY" {
+		t.Fatal("an unsigned runner must not be sent")
+	}
+
+	man := (&release.Manifest{Version: "2.1.0", Arch: "amd64", Files: map[string]string{"pbcm-runner": release.Hash(newRunner)}}).Encode()
+	dir := filepath.Dir(h.m.runnerPath)
+	os.WriteFile(filepath.Join(dir, "MANIFEST"), man, 0o644)
+	os.WriteFile(filepath.Join(dir, "MANIFEST.sig"), release.Sign("test", priv, man), 0o644)
+	h.m.runnerCache = nil
+	delete(h.m.measureAsked, "runner:"+c.ID)
+	h.m.SyncClient(ctx, c.ID)
+	if b, _ := os.ReadFile(h.host.Path(runner.Path)); !bytes.Equal(b, newRunner) {
+		t.Fatalf("the signed runner should be on the client: %q", b)
+	}
+	if s := h.m.RunnerState(c.ID); s != RunnerCurrent {
+		t.Fatalf("after the update: %s", s)
+	}
+	if c, _ = h.st.GetClient(c.ID); c.RunnerVersion != "2.1.0" {
+		t.Fatalf("runner version: %q", c.RunnerVersion)
 	}
 }

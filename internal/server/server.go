@@ -25,8 +25,11 @@ import (
 	"github.com/bradyloveland/pbcmanager/internal/bundle"
 	"github.com/bradyloveland/pbcmanager/internal/clients"
 	"github.com/bradyloveland/pbcmanager/internal/config"
+	"github.com/bradyloveland/pbcmanager/internal/release"
 	"github.com/bradyloveland/pbcmanager/internal/sshx"
 	"github.com/bradyloveland/pbcmanager/internal/store"
+	"github.com/bradyloveland/pbcmanager/internal/update"
+	"github.com/bradyloveland/pbcmanager/internal/version"
 )
 
 const (
@@ -50,6 +53,17 @@ type Options struct {
 	// RunnerPath is the pbcm-runner (linux/amd64) sent to clients. By
 	// default it's next to this program.
 	RunnerPath string
+	// AppDir is the program folder updates are installed into (the folder
+	// this program is in, by default).
+	AppDir string
+	// UpdateAPI and UpdateKeys override where releases are found and which
+	// keys may sign them (tests).
+	UpdateAPI  string
+	UpdateKeys []release.Key
+	// Supervised overrides whether systemd restarts the server (tests).
+	Supervised func() bool
+	// Executable overrides this program's path (tests).
+	Executable string
 }
 
 // Server serves the UI and API.
@@ -63,6 +77,7 @@ type Server struct {
 	pbs      *backups.PBS
 	notifier *alerts.Notifier
 	sizes    *backups.Tracker
+	updater  *update.Updater
 	pollStop context.CancelFunc
 
 	mu         sync.Mutex
@@ -76,6 +91,12 @@ type Server struct {
 	enroll  map[string]*enrollment
 
 	stop chan struct{}
+
+	// restart is closed to stop the server for an update; rollback is
+	// the reason when it's to go back to the previous version.
+	restart     chan struct{}
+	restartOnce sync.Once
+	rollback    string
 }
 
 // New prepares a server. Call Start to begin listening.
@@ -94,14 +115,25 @@ func New(opts Options) (*Server, error) {
 		opts: opts, store: opts.Store, throttle: auth.NewThrottle(),
 		listeners: map[string]*sniffListener{},
 		tickets:   map[string]*loginTicket{}, enroll: map[string]*enrollment{},
-		stop: make(chan struct{}),
+		stop: make(chan struct{}), restart: make(chan struct{}),
 	}
 	s.throttle.Delay = opts.FailDelay
-	if opts.RunnerPath == "" {
+	if opts.AppDir == "" {
 		if exe, err := os.Executable(); err == nil {
-			opts.RunnerPath = filepath.Join(filepath.Dir(exe), "pbcm-runner")
+			if real, err := filepath.EvalSymlinks(exe); err == nil {
+				exe = real
+			}
+			opts.AppDir = filepath.Dir(exe)
 		}
 	}
+	if opts.RunnerPath == "" {
+		opts.RunnerPath = filepath.Join(opts.AppDir, "pbcm-runner")
+	}
+	if opts.Supervised == nil {
+		// systemd sets INVOCATION_ID for the services it runs.
+		opts.Supervised = func() bool { return os.Getenv("INVOCATION_ID") != "" }
+	}
+	s.opts = opts
 	id, err := sshx.LoadOrCreateIdentity(filepath.Join(opts.ConfigDir, "ssh", "id_ed25519"), "pbcm-server@"+opts.Hostname)
 	if err != nil {
 		return nil, fmt.Errorf("server SSH key: %w", err)
@@ -137,6 +169,8 @@ func New(opts Options) (*Server, error) {
 			s.sizes.Request("backup:" + r.JobID)
 		}
 	}
+	s.updater = &update.Updater{Files: update.Files{AppDir: opts.AppDir, DataDir: opts.DataDir}, Store: opts.Store,
+		Version: version.Version, Keys: opts.UpdateKeys, API: opts.UpdateAPI, Supervised: opts.Supervised, Executable: opts.Executable}
 	s.mux = http.NewServeMux()
 	s.routes()
 	s.http = &http.Server{
@@ -183,6 +217,8 @@ func (s *Server) Start() error {
 	go s.clients.Poll(ctx)
 	go s.notifier.Loop(ctx)
 	go s.sizes.Loop(ctx)
+	go s.updateLoop(ctx)
+	s.updater.Started(30 * time.Second)
 	return nil
 }
 
@@ -207,6 +243,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.pollStop != nil {
 		s.pollStop()
 	}
+	s.updater.Stop()
 	s.mu.Lock()
 	if s.pending != nil {
 		s.pending.timer.Stop()
@@ -396,6 +433,11 @@ type handler func(w http.ResponseWriter, r *http.Request) (any, error)
 // api wraps a JSON endpoint: it checks the anti-CSRF header on writes, the
 // session when needed, limits the body and writes the result or error.
 func (s *Server) api(needAuth bool, fn handler) http.HandlerFunc {
+	return s.apiLimit(needAuth, maxBody, fn)
+}
+
+// apiLimit is api with a different body size limit (for uploads).
+func (s *Server) apiLimit(needAuth bool, limit int64, fn handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Header.Get(csrfHeader) != "1" {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Missing request header."})
@@ -405,7 +447,7 @@ func (s *Server) api(needAuth bool, fn handler) http.HandlerFunc {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Sign in to continue."})
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
 		v, err := fn(w, r)
 		if err != nil {
 			var ae *apiError

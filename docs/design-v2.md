@@ -129,7 +129,7 @@ The UI suggests turning off root password login over SSH once a client is added.
 | `browse <path>` | Folder picker |
 | `measure <path>...` | Starts measuring each folder in the background, as a transient systemd unit at idle CPU and disk priority (`du -sxb`, or walking the tree if `du` can't). Results are reported with `status`. A slow folder never holds up the server's SSH connection. |
 | `detect`, `install-client` | OS detection and installing `proxmox-backup-client` |
-| `self-update` | Replaces itself with a new signed version read from its input |
+| `self-update` | Replaces itself with a new version read from its input, after checking the release signature with its own built-in keys |
 | `uninstall` | Removes timers, units, files, the sudo rule and the `pbcm` user. With `--keep-history` it keeps `/var/lib/pbcm`. |
 
 Every command checks its arguments and works only on `pbcm` files and units. Root through the sudo rule can't be used for anything else.
@@ -217,24 +217,33 @@ The repository is public, so the server can check GitHub's releases without a to
 
 ### Checking a release
 
-- Each release includes `SHA256SUMS` and an ed25519 signature of it. GitHub Actions signs them with a private key kept in a repository secret.
-- The public key is built into the executables. A file whose signature doesn't match is refused, whether downloaded or uploaded.
-- Installing an older version is allowed only as an explicit "Roll back to X" action.
+- Each release archive contains a `MANIFEST` listing every file's SHA-256, and `MANIFEST.sig`, an ed25519 signature of it. An uploaded archive can therefore be checked on its own. GitHub Actions signs releases with a private key kept in a repository secret. `SHA256SUMS` is still published for install.sh.
+- The public keys are built into both executables. An archive is refused, downloaded or uploaded, if its signature doesn't match, if a file's checksum is wrong, or if it holds anything not in the manifest (links, subfolders, extra files).
+- Several keys can be trusted at once, so the key can be replaced without breaking updates.
+- Installing an older version is allowed only as the "Go back to X" action.
 
 ### Installing a release on the server
 
-1. Back up the database to `backups/pbcm-<old version>-<time>.db`.
-2. Write the new executable next to the old one, keep the old one as `pbcm.prev`, and swap them in one step (rename).
-3. Exit. systemd restarts the service, and the new version applies any database migrations. Backups on clients aren't affected.
-4. If the new version doesn't report healthy within 60 seconds, or fails to start three times, a small `pbcm-rollback` unit (started by `OnFailure=`) puts back the previous version and database. The UI then says the update was rolled back, and why.
+1. **Back up the database** to `/var/lib/pbcm/backups/` (`VACUUM INTO`, safe while running). The newest five are kept.
+2. **Swap the files.** The new `pbcm`, `pbcm-runner`, manifest and scripts are written next to the old ones. The old ones are kept as `.prev` (hard links), and each new file is renamed into place. `update.json` records the update as installed.
+3. **Restart.** The server stops cleanly and exits. systemd starts the new version, which applies any database migrations. Backups on clients aren't affected.
+4. **Confirm.** Once the new version has stayed up for 30 seconds, the update is done.
+5. **Roll back automatically** if the new version doesn't stay up:
+   - The service's `ExecStopPost` runs `pbcm.prev rollback --after-failure` each time the service stops. It does nothing after a clean stop, or once an update is confirmed.
+   - While an update is unconfirmed, it counts the new version's failures. After three, it puts back the previous files and the database copy, and systemd starts the old version.
+   - If the new version couldn't start, it saves its error in `update.json` first, so the Updates page can say why.
+   - This doesn't use systemd's start limit, which also counts normal restarts and could undo a working update made soon after another.
+6. **Go back by hand:** the Updates page offers "Go back to X" while the previous version is kept. The database copy is restored after the server has closed the database, and changes made since the update are lost.
 
-The service user owns the install folder, so this needs no root access.
+The service user owns the install folder, so none of this needs root access. Changes to the systemd unit itself only arrive by running install.sh, which release notes will mention when needed.
+
+Updates from the web UI need the server to run as the systemd service (systemd sets `INVOCATION_ID`) from its install folder. A development copy shows why it can't update instead.
 
 ### Updating clients
 
-After the server updates, it sends the matching `pbcm-runner` to each client with `self-update`. The runner checks the signature itself before replacing anything. The UI lists each client's runner version.
+Clients report their `pbcm-runner`'s SHA-256 and version with every status check. When it differs from the server's copy, the server sends its runner with `self-update`, along with the signed manifest. The runner checks the signature against its own built-in keys, and checks the file against the manifest, before replacing itself. A server that isn't a signed release (a development build) never sends one; those clients need Repair. Runners from before milestone 5 don't have `self-update` and need Repair once.
 
-The server keeps working with runners one minor version behind, so an offline client is fine until it's back.
+The Updates page lists each client's runner version and whether it's up to date. The server keeps working with runners one minor version behind, so an offline client is fine until it's back.
 
 ## Settings in the browser
 
@@ -260,7 +269,7 @@ Every setting that was CLI-only or config-file-only in 1.x is on a **Settings** 
 
 **What still needs a terminal:**
 - The first install: one command in the LXC.
-- Recovery commands for when you're locked out of the web UI: `pbcm passwd`, `pbcm totp-reset`, and `pbcm network --reset` (every interface, port 8099, self-signed HTTPS).
+- Recovery commands for when you're locked out of the web UI: `pbcm passwd`, `pbcm totp-reset`, `pbcm network --reset` (every interface, port 8099, self-signed HTTPS), and `pbcm rollback` if an update left the web UI unreachable (rollback is normally automatic).
 - `pbcm-runner uninstall` on a client whose server is gone.
 
 ## Install
@@ -333,7 +342,7 @@ Everything in 1.2.0, now per client:
 | **M2: clients** | SSH key, adding a client as root, host key pinning, OS detection, installing `proxmox-backup-client`, `pbcm` account and sudo rule, `pbcm-runner` install, folder browser, Repair and Remove client |
 | **M3: backups** | Destinations and per-client overrides, jobs with several destinations, `apply`, timers, `run`/`start`/`cancel`, credentials on clients, status catch-up, live logs, snapshots, email alerts including missed and unreachable |
 | **M4: dashboard** | Folder sizes measured on clients, newest backup sizes, destination space, Data protected and Destination space widgets, nearly-full alerts |
-| **M5: updates** | Signed releases, update check, upload, swap, health check, rollback, runner updates |
+| **M5: updates** | Signed releases, update check (daily and on demand), upload, optional automatic install in a chosen hour, swap, confirm, automatic and manual rollback, runner updates to clients |
 | **M6: moving from 1.x and release** | 1.x import, docs, LXC recipe, testing on your machines → **2.0.0** |
 
 Each milestone ends with passing tests and a pull request into `v2`, so you can try it in a test LXC as it grows.

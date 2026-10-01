@@ -31,6 +31,7 @@ type env struct {
 	st     *store.Store
 	srv    *Server
 	window time.Duration
+	opts   func(*Options) // changes the server's options before it starts
 }
 
 func freePort(t *testing.T) int {
@@ -46,6 +47,11 @@ func freePort(t *testing.T) int {
 // newEnv starts a server on 127.0.0.1 with plain HTTP unless n says
 // otherwise. withAdmin creates the admin account.
 func newEnv(t *testing.T, n *config.Network, withAdmin bool) *env {
+	t.Helper()
+	return newEnvOpts(t, n, withAdmin, nil)
+}
+
+func newEnvOpts(t *testing.T, n *config.Network, withAdmin bool, opts func(*Options)) *env {
 	t.Helper()
 	dir := t.TempDir()
 	box, err := secret.LoadOrCreate(filepath.Join(dir, "secret.key"))
@@ -73,7 +79,7 @@ func newEnv(t *testing.T, n *config.Network, withAdmin bool) *env {
 			t.Fatal(err)
 		}
 	}
-	e := &env{t: t, dir: dir, st: st, window: 2 * time.Minute}
+	e := &env{t: t, dir: dir, st: st, window: 2 * time.Minute, opts: opts}
 	e.start()
 	return e
 }
@@ -84,8 +90,12 @@ func (e *env) start() {
 	if _, err := os.Stat(runner); err != nil {
 		os.WriteFile(runner, []byte("RUNNER"), 0o755)
 	}
-	srv, err := New(Options{ConfigDir: e.dir, DataDir: e.dir, Store: e.st, FailDelay: time.Millisecond, ConfirmWindow: e.window,
-		Hostname: "nas", RunnerPath: runner})
+	o := Options{ConfigDir: e.dir, DataDir: e.dir, Store: e.st, FailDelay: time.Millisecond, ConfirmWindow: e.window,
+		Hostname: "nas", RunnerPath: runner}
+	if e.opts != nil {
+		e.opts(&o)
+	}
+	srv, err := New(o)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -144,7 +154,9 @@ type resp struct {
 func (c *client) do(method, path string, body any, headers map[string]string) resp {
 	c.t.Helper()
 	var rd io.Reader
-	if body != nil {
+	if raw, ok := body.([]byte); ok {
+		rd = bytes.NewReader(raw)
+	} else if body != nil {
 		raw, _ := json.Marshal(body)
 		rd = bytes.NewReader(raw)
 	}

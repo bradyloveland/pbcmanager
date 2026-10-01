@@ -16,8 +16,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -29,8 +31,13 @@ import (
 	"github.com/bradyloveland/pbcmanager/internal/secret"
 	"github.com/bradyloveland/pbcmanager/internal/server"
 	"github.com/bradyloveland/pbcmanager/internal/store"
+	"github.com/bradyloveland/pbcmanager/internal/update"
 	"github.com/bradyloveland/pbcmanager/internal/version"
 )
+
+// brokenOnPurpose makes serve fail, for CI's test of rolling back a bad
+// update (set with -X). Release builds leave it empty.
+var brokenOnPurpose string
 
 type dirs struct{ config, data string }
 
@@ -77,6 +84,8 @@ func main() {
 		err = cmdTOTPReset(args)
 	case "network":
 		err = cmdNetwork(args)
+	case "rollback":
+		err = cmdRollback(args)
 	case "version", "--version", "-v":
 		fmt.Println(version.Version)
 	case "help", "-h", "--help":
@@ -103,6 +112,7 @@ Commands:
   passwd       Set the admin password (and optionally the username)
   totp-reset   Turn off two-step verification if you've lost your authenticator
   network      Change how the web UI is reached, or --reset to the defaults
+  rollback     Put back the version from before the last update
   version      Print the version
 
 Every command takes --config-dir and --data-dir (defaults /etc/pbcm and
@@ -123,26 +133,86 @@ func cmdServe(args []string) error {
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
 
-	st, err := d.open()
-	if err != nil {
+	if brokenOnPurpose != "" {
+		err := errors.New("this test build doesn't start, on purpose")
+		update.RecordStartFailure(d.data, version.Version, err)
 		return err
 	}
-	defer st.Close()
+	st, err := d.open()
+	if err != nil {
+		update.RecordStartFailure(d.data, version.Version, err)
+		return err
+	}
 	srv, err := server.New(server.Options{ConfigDir: d.config, DataDir: d.data, Store: st, RunnerPath: os.Getenv("PBCM_RUNNER")})
 	if err != nil {
+		st.Close()
+		update.RecordStartFailure(d.data, version.Version, err)
 		return err
 	}
 	if err := srv.Start(); err != nil {
+		st.Close()
+		update.RecordStartFailure(d.data, version.Version, err)
 		return err
 	}
 	slog.Info("started", "version", version.Version)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	<-ctx.Done()
-	slog.Info("stopping")
+	select {
+	case <-ctx.Done():
+		slog.Info("stopping")
+	case <-srv.Restarting():
+		slog.Info("restarting for an update")
+	}
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return srv.Shutdown(shutdown)
+	err = srv.Shutdown(shutdown)
+	st.Close()
+	// Going back by hand replaces the database, so it waits until it's closed.
+	if reason := srv.RollbackRequested(); reason != "" {
+		if rerr := srv.UpdateFiles().Rollback(reason, true); rerr != nil {
+			slog.Error("couldn't roll back", "err", rerr)
+		}
+	}
+	return err
+}
+
+// cmdRollback puts back the version from before the last update. The
+// service runs it with --after-failure (from pbcm.prev) each time it stops,
+// to undo an update that keeps failing; see update.Files.AfterStop.
+func cmdRollback(args []string) error {
+	fs := flag.NewFlagSet("rollback", flag.ExitOnError)
+	var d dirs
+	d.flags(fs)
+	afterFailure := fs.Bool("after-failure", false, "count a failed run of a new version, and roll back after "+strconv.Itoa(update.MaxFailures))
+	_ = fs.Parse(args)
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	exe, _ = filepath.EvalSymlinks(exe)
+	files := update.Files{AppDir: filepath.Dir(exe), DataDir: d.data}
+	if *afterFailure {
+		rolled, err := files.AfterStop(os.Getenv("SERVICE_RESULT"))
+		if rolled {
+			fmt.Println("The new version kept failing, so the previous one was put back.")
+		}
+		return err
+	}
+	s, err := update.ReadState(d.data)
+	if err != nil {
+		return err
+	}
+	if s == nil || s.Phase == update.RolledBack {
+		return errors.New("there's no update to undo")
+	}
+	if exec.Command("systemctl", "is-active", "--quiet", "pbcm").Run() == nil {
+		return errors.New("stop the service first (systemctl stop pbcm), or roll back from the Updates page")
+	}
+	if err := files.Rollback("Rolled back with pbcm rollback.", true); err != nil {
+		return err
+	}
+	fmt.Printf("Put back version %s. Start the service again: systemctl start pbcm\n", s.From)
+	return nil
 }
 
 func cmdSetupCode(args []string) error {

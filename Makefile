@@ -1,5 +1,6 @@
-VERSION := $(shell cat internal/version/VERSION)
-LDFLAGS := -s -w
+VERSION ?= $(shell cat internal/version/VERSION)
+# EXTRA_LDFLAGS is for CI's update tests (a test signing key, a fake version).
+LDFLAGS := -s -w -X github.com/bradyloveland/pbcmanager/internal/version.override=$(VERSION) $(EXTRA_LDFLAGS)
 DEV_DIR ?= $(CURDIR)/tmp/dev
 
 .PHONY: build test lint check dist dev clean
@@ -16,14 +17,15 @@ test:
 	go test -race ./...
 
 lint:
-	@test -z "$$(gofmt -l cmd internal web)" || { echo "Run gofmt on:"; gofmt -l cmd internal web; exit 1; }
+	@test -z "$$(gofmt -l cmd internal tools web)" || { echo "Run gofmt on:"; gofmt -l cmd internal tools web; exit 1; }
 	go vet ./...
 	staticcheck ./...
 	shellcheck -x install.sh uninstall.sh scripts/*.sh internal/clients/setup.sh
 
 check: lint test
 
-# Release archives for Linux on x86-64 and ARM64.
+# Release archives for Linux on x86-64 and ARM64. Set PBCM_SIGNING_KEY to sign
+# them; unsigned archives install with install.sh but not from the web UI.
 dist:
 	rm -rf dist && mkdir -p dist
 	for arch in amd64 arm64; do \
@@ -32,6 +34,7 @@ dist:
 		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$$name/pbcm ./cmd/pbcm || exit 1; \
 		$(RUNNER_BUILD) -o dist/$$name/pbcm-runner ./cmd/pbcm-runner || exit 1; \
 		cp install.sh uninstall.sh LICENSE README.md CHANGELOG.md dist/$$name/; \
+		go run ./tools/pbcm-sign sign dist/$$name $(VERSION) $$arch || exit 1; \
 		tar -C dist -czf dist/$$name.tar.gz $$name; \
 		rm -rf dist/$$name; \
 	done

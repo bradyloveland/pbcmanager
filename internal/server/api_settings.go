@@ -17,12 +17,7 @@ func (s *Server) settingValues() map[string]any {
 		case "int":
 			out[d.Key] = s.settingInt(d.Key)
 		case "bool":
-			v, _ := d.Default.(bool)
-			var stored bool
-			if ok, err := s.store.GetSetting(d.Key, &stored); ok && err == nil {
-				v = stored
-			}
-			out[d.Key] = v
+			out[d.Key] = s.settingBool(d.Key)
 		default:
 			out[d.Key] = s.settingString(d.Key)
 		}

@@ -40,6 +40,7 @@ var Groups = []Group{
 	{"security", "Sign-in and sessions"},
 	{"history", "Run history"},
 	{"sizes", "Sizes and space"},
+	{"updates", "Updates"},
 }
 
 // Defs lists every setting. New milestones add theirs here, and the Settings
@@ -72,6 +73,15 @@ var Defs = []Def{
 	{Key: "sizes.folder_hours", Group: "sizes", Label: "Measure backed-up folders every",
 		Help: "Clients add up how much data is in each folder at low priority, so it doesn't slow them down. Large folders can take a while. Set to 0 to measure only when you ask.",
 		Type: "int", Unit: "hours", Min: 0, Max: 720, Default: 12},
+	{Key: "updates.check", Group: "updates", Label: "Check for updates every day",
+		Help: "Asks GitHub once a day whether a new version is out, and shows a notice when there is. Nothing is installed unless you choose to.",
+		Type: "bool", Default: true},
+	{Key: "updates.auto", Group: "updates", Label: "Install updates automatically",
+		Help: "Installs new versions on its own during the hour below. The server restarts for a few seconds; backups on clients carry on. If the new version doesn't start, the previous one is put back.",
+		Type: "bool", Default: false},
+	{Key: "updates.hour", Group: "updates", Label: "Install automatic updates at",
+		Help: "The hour of the day, in this server's time zone (0 is midnight).",
+		Type: "int", Unit: "o'clock", Min: 0, Max: 23, Default: 3},
 }
 
 // Lookup returns the definition for key.

@@ -47,6 +47,10 @@ type Manager struct {
 	// measureAsked is when the server last asked for each folder ("client:path").
 	measureAsked map[string]time.Time
 	measuring    map[string]bool
+	// pbcm-runner on each client (by hash) and this server's copy.
+	runnerHashes   map[string]string
+	runnerUpdating map[string]bool
+	runnerCache    *serverRunner
 
 	// Sync configures keeping clients in step (see sync.go).
 	Sync SyncConfig
