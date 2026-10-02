@@ -43,6 +43,8 @@ jobs:
           - {image: "debian:trixie", user: root}
           - {image: "debian:bookworm", user: root}
           - {image: "ubuntu:24.04", user: alice, extra: sudo, expect: "static build"}
+          # Like OpenMediaVault: only root and the _ssh group may sign in.
+          - {image: "debian:bookworm", user: root, ssh_group: _ssh, expect: "Added pbcm to the _ssh group"}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -53,8 +55,9 @@ jobs:
           IMAGE: ${{ matrix.image }}
           EXTRA: ${{ matrix.extra }}
           SETUP_USER: ${{ matrix.user }}
+          SSH_GROUP: ${{ matrix.ssh_group }}
         run: |
-          docker run -d --name client -p 127.0.0.1:2222:22 -e EXTRA -e SETUP_USER "$IMAGE" bash -c '
+          docker run -d --name client -p 127.0.0.1:2222:22 -e EXTRA -e SETUP_USER -e SSH_GROUP "$IMAGE" bash -c '
             set -e
             export DEBIAN_FRONTEND=noninteractive
             apt-get update -q
@@ -66,6 +69,11 @@ jobs:
               useradd -m -s /bin/bash "$SETUP_USER"
               echo "$SETUP_USER:ci-root-password" | chpasswd
               usermod -aG sudo "$SETUP_USER"
+            fi
+            if [ -n "$SSH_GROUP" ]; then
+              # The openssh-server package already creates _ssh on Debian.
+              getent group "$SSH_GROUP" >/dev/null || groupadd "$SSH_GROUP"
+              echo "AllowGroups root $SSH_GROUP" >> /etc/ssh/sshd_config
             fi
             exec /usr/sbin/sshd -D -e'
           for i in $(seq 1 120); do

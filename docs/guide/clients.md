@@ -23,6 +23,8 @@ Setup does the following on the client:
 
 The server never signs in as root again.
 
+If the client only lets certain groups sign in over SSH, as OpenMediaVault does with `AllowGroups root _ssh`, setup adds `pbcm` to an allowed group. It never chooses one that grants admin rights. If it's limited by user (`AllowUsers`) instead, setup doesn't edit your SSH settings; its log says which line to change.
+
 ## While the server is down
 
 Each client has its own copy of its jobs, as systemd timers, and the credentials it needs, encrypted with `systemd-creds` where available. Backups keep running on schedule. When the server is back, it collects the results it missed, including their logs, and reports failures.
