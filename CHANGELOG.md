@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- **The Dashboard groups backup jobs under their client,** in sections you expand or collapse by clicking the client's header. Each header shows the client's status, a job counter (running, failing and disabled jobs included) and a **Client details** button. Your browser remembers which sections are open, and a client with a failing job or a connection problem always opens by itself. ([#13](https://github.com/bradyloveland/pbcmanager/issues/13))
 - **Jobs have an Enabled switch** next to their name at the top of the job page, so a job can be turned on or off without opening Edit job. It replaces the job form's "Run on schedule" checkbox, which read oddly next to a "By hand only" schedule. A disabled job doesn't run, on schedule or with Run now, and the job lists say **Disabled** instead of "Paused". ([#10](https://github.com/bradyloveland/pbcmanager/issues/10))
 
 ## [2.0.1] - 2026-10-01

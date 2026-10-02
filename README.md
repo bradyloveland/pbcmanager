@@ -16,6 +16,7 @@ A self-hosted web UI for file-level backups with `proxmox-backup-client`. One ce
 ## Features
 
 - **Dashboard:**
+  - each client with its backup jobs, in sections you can expand or collapse
   - the health of every job, with its last 20 runs
   - how much data is protected
   - how full each datastore is
