@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-10-01
+
 ### Fixed
 - **Adding an OpenMediaVault client failed after setup** because OMV only lets the `_ssh` group sign in over SSH (`AllowGroups root _ssh`). Setup now adds the `pbcm` account to an allowed group when sshd limits sign-ins by group. It never chooses one that grants admin rights, such as `sudo` or `docker`. When the limit is by user (`AllowUsers`) or a `Deny…` rule, setup leaves `sshd_config` alone and says exactly what to change. ([#9](https://github.com/bradyloveland/pbcmanager/issues/9))
 - When the server can't sign in as `pbcm` after setup, the message now says what to do, including the OpenMediaVault command, without a doubled full stop.
@@ -120,6 +122,7 @@ First public release.
 ### Added
 - Initial release: destinations, backup jobs with schedules, folder browser, exclusions, speed limits, encryption keys, live logs, run cancellation, snapshot listing, email failure alerts, HTTPS with a self-signed certificate, systemd installer.
 
-[Unreleased]: https://github.com/bradyloveland/pbcmanager/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/bradyloveland/pbcmanager/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/bradyloveland/pbcmanager/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/bradyloveland/pbcmanager/releases/tag/v2.0.0
 [1.2.0]: https://github.com/bradyloveland/pbcmanager/releases/tag/v1.2.0
