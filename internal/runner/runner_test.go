@@ -179,3 +179,46 @@ func TestUninstallKeepsAccountWhenServerIsHere(t *testing.T) {
 		t.Fatalf("output: %s", out)
 	}
 }
+
+func TestListFilesystems(t *testing.T) {
+	env, _, _ := testEnv(t)
+	write(t, env.path("/proc/self/mountinfo"), `22 1 179:2 / / rw,noatime shared:1 - ext4 /dev/mmcblk0p2 rw
+23 22 0:5 / /dev rw,nosuid shared:2 - devtmpfs udev rw,size=1G
+24 22 0:21 / /proc rw,nosuid shared:3 - proc proc rw
+25 22 0:22 / /sys rw,nosuid shared:4 - sysfs sysfs rw
+26 22 0:23 / /run rw,nosuid shared:5 - tmpfs tmpfs rw
+30 22 179:1 / /boot/firmware rw,relatime shared:6 - vfat /dev/mmcblk0p1 rw
+31 22 8:1 / /media/usb\040drive rw,relatime shared:7 - ext4 /dev/sda1 rw
+32 22 0:40 / /srv/merged rw shared:8 - fuse.mergerfs data:disk1 rw
+33 22 0:41 / /var/lib/docker/overlay2/abc/merged rw - overlay overlay rw
+34 22 0:42 / /media/usb\040drive rw,relatime shared:9 - ext4 /dev/sdb1 rw
+bad line
+`)
+	write(t, env.path("/proc/swaps"), "Filename\tType\tSize\tUsed\tPriority\n/var/swap file 102396 0 -2\n/dev/zram0 partition 1000 0 100\n")
+	write(t, env.path("/var/swap"), "")
+	os.MkdirAll(env.path("/var/cache/apt/archives"), 0o755)
+	os.MkdirAll(env.path("/var/lib/docker"), 0o755)
+	fs, err := ListFilesystems(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]Mount{}
+	for _, m := range fs.Mounts {
+		got[m.Path] = m
+	}
+	if len(fs.Mounts) != 9 {
+		t.Fatalf("mounts: %+v", fs.Mounts)
+	}
+	if m := got["/media/usb drive"]; m.Source != "/dev/sdb1" || m.Virtual {
+		t.Fatalf("escaped path, and the later mount wins: %+v", m)
+	}
+	if !got["/proc"].Virtual || !got["/run"].Virtual || !got["/var/lib/docker/overlay2/abc/merged"].Virtual {
+		t.Fatal("proc, tmpfs and container layers have nothing to back up")
+	}
+	if got["/boot/firmware"].Virtual || got["/srv/merged"].Virtual || got["/"].Type != "ext4" {
+		t.Fatalf("real filesystems: %+v", fs.Mounts)
+	}
+	if !reflect.DeepEqual(fs.RootExcludes, []string{"/var/swap", "/var/cache/apt/archives"}) || !fs.Docker {
+		t.Fatalf("suggestions: %+v docker=%v", fs.RootExcludes, fs.Docker)
+	}
+}

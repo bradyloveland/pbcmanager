@@ -53,6 +53,21 @@ A Raspberry Pi, or any ARM64 machine, can be a client if:
 
 Setup adds Proxmox's Debian 13 `pbs-client` repository with its **`test`** component, which is where Proxmox publishes the ARM64 builds. The package is still checked against Proxmox's signing key. It's Proxmox's testing channel rather than its stable one, so it can be a version or two behind the x86-64 build. Everything else works as on x86-64.
 
+## Backing up the whole system
+
+A job can back up `/`. Each folder's backup stays on that folder's own filesystem, so other filesystems mounted inside it aren't included:
+- Virtual ones such as `/proc`, `/sys`, `/dev`, `/run` and a tmpfs `/tmp` are skipped. There's nothing to back up there.
+- Real disks are skipped too: the Raspberry Pi's boot partition (`/boot/firmware`), USB drives, and NFS or SMB mounts.
+
+The job form lists the disks inside the folders you picked, with **Add as a folder** to include one as an archive of its own.
+
+When you pick `/`, the form also adds the usual excludes that exist on the client to **Skip these files and folders**:
+- swap files, such as `/var/swap`
+- downloaded packages (`/var/cache/apt/archives`)
+- `/var/tmp` and `/lost+found`
+
+They're ordinary lines you can remove. If the client runs Docker, the form says so: `/var/lib/docker` holds volumes as well as images, so decide whether to keep it.
+
 ## Folder sizes
 
 Clients measure each backed-up folder in the background at idle priority, every 12 hours by default. The Dashboard adds them up as **Data protected**. Change how often under **Settings → Sizes and space**, or press **Measure again**.

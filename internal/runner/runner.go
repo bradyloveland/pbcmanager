@@ -131,6 +131,12 @@ func Dispatch(env *Env, args []string) error {
 			return err
 		}
 		return json.NewEncoder(env.Stdout).Encode(res)
+	case "filesystems":
+		res, err := ListFilesystems(env)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(env.Stdout).Encode(res)
 	case "uninstall":
 		keep := len(args) > 1 && args[1] == "--keep-history"
 		return Uninstall(env, keep)
