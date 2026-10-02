@@ -35,7 +35,9 @@ while [ $# -gt 0 ]; do
 done
 
 [ "$(id -u)" = 0 ] || die "run this as root: sudo bash $0"
-[ -n "$user" ] && [ "$user" != root ] || die "say which account does the development: --user NAME (not root)"
+if [ -z "$user" ] || [ "$user" = root ]; then
+  die "say which account does the development: --user NAME (not root)"
+fi
 id "$user" >/dev/null 2>&1 || die "there's no account called $user. Create it first: adduser $user"
 # shellcheck source=/dev/null
 . /etc/os-release
