@@ -147,7 +147,7 @@ func TestClean(t *testing.T) {
 func TestSendPlainSMTP(t *testing.T) {
 	smtp := newSMTP(t)
 	s := Settings{Host: "127.0.0.1", Port: smtp.port(), Security: "none", From: "nas@example.net", To: "a@example.net; b@example.net"}
-	if err := Send(context.Background(), s, "Backup failed: médias", "Line one\nLine two"); err != nil {
+	if err := Send(context.Background(), s, "Backup failed: médias", "Line one\nLine two", ""); err != nil {
 		t.Fatal(err)
 	}
 	msgs := smtp.all()
@@ -159,11 +159,11 @@ func TestSendPlainSMTP(t *testing.T) {
 		t.Fatal("both recipients")
 	}
 	s.Security = "starttls"
-	if err := Send(context.Background(), s, "x", "y"); err == nil || !strings.Contains(err.Error(), "doesn't offer STARTTLS") {
+	if err := Send(context.Background(), s, "x", "y", ""); err == nil || !strings.Contains(err.Error(), "doesn't offer STARTTLS") {
 		t.Fatalf("starttls on a server without it: %v", err)
 	}
 	s.Port = 1
-	if err := Send(context.Background(), s, "x", "y"); err == nil || !strings.Contains(err.Error(), "can't connect") {
+	if err := Send(context.Background(), s, "x", "y", ""); err == nil || !strings.Contains(err.Error(), "can't connect") {
 		t.Fatalf("closed port: %v", err)
 	}
 }
@@ -172,6 +172,7 @@ type env struct {
 	n     *Notifier
 	st    *store.Store
 	sent  []string
+	html  []string // the HTML body of each email ("" for plain text)
 	mu    sync.Mutex
 	clock time.Time
 	logs  string
@@ -193,10 +194,11 @@ func newEnv(t *testing.T) *env {
 	e.n = &Notifier{Store: st, Settings: func() Settings { return settings }, ServerName: func() string { return "backup-server" },
 		PublicURL: func() string { return "https://backups.example.net/" },
 		LogPath:   func(c, r string) string { return filepath.Join(dir, r+".log") }, Now: func() time.Time { return e.clock },
-		Send: func(ctx context.Context, s Settings, subject, body string) error {
+		Send: func(ctx context.Context, s Settings, subject, body, html string) error {
 			e.mu.Lock()
 			defer e.mu.Unlock()
 			e.sent = append(e.sent, subject+"\n"+body)
+			e.html = append(e.html, html)
 			if e.fail {
 				return context.DeadlineExceeded
 			}
@@ -439,5 +441,73 @@ func TestBytes(t *testing.T) {
 		if got := Bytes(n); got != want {
 			t.Errorf("Bytes(%d) = %q, want %q", n, got, want)
 		}
+	}
+}
+
+func TestHTMLEmail(t *testing.T) {
+	e := newEnv(t)
+	c := client()
+	c.Name = `NAS <script>alert(1)</script> & "co" 🚀`
+	code := 1
+	run := &store.Run{ClientID: "c1", Run: bundle.Run{ID: "r5", JobID: "j1", JobName: `media <b>bold</b>`, DestinationName: "Home PBS",
+		Trigger: "schedule", Status: bundle.Failed, Started: e.clock.Add(-time.Hour).Unix(), Ended: e.clock.Add(-50 * time.Minute).Unix(),
+		ExitCode: &code, Summary: "Error: <bad> & worse"}, CollectedAt: e.clock.Add(-50 * time.Minute).Unix()}
+	os.WriteFile(filepath.Join(e.logs, "r5.log"), []byte("line <one>\nError: & two\n"), 0o600)
+	e.n.RunFinished(c, run)
+	e.messages()
+	e.mu.Lock()
+	html := e.html[0]
+	e.mu.Unlock()
+	for _, want := range []string{"BACKUP FAILED", "Backup failed", "#B3261E", "&lt;script&gt;alert(1)&lt;/script&gt; &amp; &#34;co&#34; 🚀",
+		"media &lt;b&gt;bold&lt;/b&gt;", "Error: &lt;bad&gt; &amp; worse", "line &lt;one&gt;", `href="https://backups.example.net/#/activity/c1/r5"`, "View the full log",
+		"Sent by PBC Manager on backup-server"} {
+		if !strings.Contains(html, want) && !(want == "BACKUP FAILED" && strings.Contains(html, ">Backup failed<")) {
+			t.Errorf("HTML missing %q", want)
+		}
+	}
+	for _, bad := range []string{"<script>", "<b>bold", "<bad>", "<img", "@import", "http://", "<link"} {
+		if strings.Contains(html, bad) {
+			t.Errorf("HTML contains %q", bad)
+		}
+	}
+	// Plain text only, when chosen.
+	plain := Defaults()
+	plain.Enabled, plain.Host, plain.From, plain.To, plain.PlainText = true, "smtp.example.net", "nas@example.net", "me@example.net", true
+	e.n.Settings = func() Settings { return plain }
+	run2 := *run
+	run2.ID = "r6"
+	e.n.RunFinished(c, &run2)
+	e.messages()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if len(e.html) != 2 || e.html[1] != "" {
+		t.Fatalf("plain-text only: %d emails, html %q", len(e.html), e.html[len(e.html)-1])
+	}
+}
+
+func TestMultipartMessage(t *testing.T) {
+	m := newSMTP(t)
+	s := Settings{Host: "127.0.0.1", Port: m.port(), Security: "none", From: "nas@example.net", To: "me@example.net"}
+	long := strings.Repeat("abcdefghij", 40) // a 400-character line
+	html := "<!DOCTYPE html><p>" + long + " café</p>"
+	if err := Send(context.Background(), s, "Hello", "Text "+long+" café", html); err != nil {
+		t.Fatal(err)
+	}
+	msgs := m.all()
+	if len(msgs) != 1 {
+		t.Fatalf("messages: %d", len(msgs))
+	}
+	raw := msgs[0]
+	if !strings.Contains(raw, "Content-Type: multipart/alternative; boundary=") || strings.Count(raw, "Content-Transfer-Encoding: quoted-printable") != 2 ||
+		strings.Index(raw, "Content-Type: text/plain") > strings.Index(raw, "Content-Type: text/html") {
+		t.Fatalf("structure:\n%s", raw)
+	}
+	for _, line := range strings.Split(raw, "\n") {
+		if len(line) > 100 {
+			t.Fatalf("line too long for SMTP (%d): %q", len(line), line)
+		}
+	}
+	if !strings.Contains(raw, "caf=C3=A9") {
+		t.Error("non-ASCII text is quoted-printable encoded")
 	}
 }

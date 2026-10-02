@@ -4,11 +4,13 @@
 package alerts
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"mime"
+	"mime/quotedprintable"
 	"net"
 	"net/smtp"
 	"os"
@@ -37,6 +39,8 @@ type Settings struct {
 	UnreachableMinutes int    `json:"unreachable_minutes"`
 	OnFull             bool   `json:"on_full"`
 	FullPercent        int    `json:"full_percent"`
+	// PlainText sends text-only emails instead of HTML with a text part.
+	PlainText bool `json:"plain_text"`
 }
 
 // Defaults are a fresh install's settings: off until set up, then failures,
@@ -157,8 +161,9 @@ func Clean(in Input, saved Settings) (Settings, error) {
 	return s, nil
 }
 
-// Send delivers one plain-text email.
-func Send(ctx context.Context, s Settings, subject, body string) error {
+// Send delivers one email: plain text, or HTML with a plain-text version
+// alongside when html isn't "".
+func Send(ctx context.Context, s Settings, subject, text, html string) error {
 	rcpts := s.Recipients()
 	if s.Host == "" || s.From == "" || len(rcpts) == 0 {
 		return errors.New("email alerts need a mail server, a sender and at least one recipient")
@@ -219,7 +224,7 @@ func Send(ctx context.Context, s Settings, subject, body string) error {
 	if err != nil {
 		return fmt.Errorf("the mail server refused the message: %s", simplify(err))
 	}
-	msg := buildMessage(s.From, rcpts, subject, body, host)
+	msg := buildMessage(s.From, rcpts, subject, text, html, host)
 	if _, err := w.Write(msg); err != nil {
 		return err
 	}
@@ -229,23 +234,44 @@ func Send(ctx context.Context, s Settings, subject, body string) error {
 	return c.Quit()
 }
 
-func buildMessage(from string, to []string, subject, body, host string) []byte {
+func buildMessage(from string, to []string, subject, text, html, host string) []byte {
 	var b strings.Builder
-	id := fmt.Sprintf("<%d.pbcm@%s>", time.Now().UnixNano(), host)
+	now := time.Now()
+	id := fmt.Sprintf("<%d.pbcm@%s>", now.UnixNano(), host)
 	headers := [][2]string{
 		{"From", from}, {"To", strings.Join(to, ", ")}, {"Subject", mime.QEncoding.Encode("utf-8", subject)},
-		{"Date", time.Now().Format(time.RFC1123Z)}, {"Message-ID", id}, {"MIME-Version", "1.0"},
-		{"Content-Type", "text/plain; charset=utf-8"}, {"Content-Transfer-Encoding", "8bit"},
+		{"Date", now.Format(time.RFC1123Z)}, {"Message-ID", id}, {"MIME-Version", "1.0"},
 		{"Auto-Submitted", "auto-generated"},
 	}
 	for _, h := range headers {
 		b.WriteString(h[0] + ": " + h[1] + "\r\n")
 	}
-	b.WriteString("\r\n")
-	for _, line := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
-		b.WriteString(line + "\r\n")
+	if html == "" {
+		b.WriteString("Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n")
+		b.WriteString(quoted(text))
+		return []byte(b.String())
 	}
+	// Plain text first, then HTML: mail apps show the last part they can.
+	boundary := fmt.Sprintf("pbcm-%x", now.UnixNano())
+	b.WriteString("Content-Type: multipart/alternative; boundary=\"" + boundary + "\"\r\n\r\n")
+	for _, part := range []struct{ kind, body string }{{"text/plain", text}, {"text/html", html}} {
+		b.WriteString("--" + boundary + "\r\n")
+		b.WriteString("Content-Type: " + part.kind + "; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n")
+		b.WriteString(quoted(part.body))
+		b.WriteString("\r\n")
+	}
+	b.WriteString("--" + boundary + "--\r\n")
 	return []byte(b.String())
+}
+
+// quoted encodes a body as quoted-printable with CRLF line endings, so no
+// line goes over SMTP's length limit and any character survives.
+func quoted(body string) string {
+	var buf bytes.Buffer
+	w := quotedprintable.NewWriter(&buf)
+	_, _ = w.Write([]byte(strings.ReplaceAll(strings.ReplaceAll(body, "\r\n", "\n"), "\n", "\r\n")))
+	_ = w.Close()
+	return buf.String()
 }
 
 func simplify(err error) string {
