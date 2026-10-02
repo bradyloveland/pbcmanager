@@ -64,7 +64,22 @@ Browser ── HTTP(S) ──> sniffing listener(s) ──> Server.ServeHTTP
 make dev
 ```
 
-This runs the server on `http://127.0.0.1:8099` with throwaway settings in `tmp/dev/` and prints the setup code. Delete `tmp/dev` to start over.
+This runs the server on `http://127.0.0.1:8099` with throwaway settings in `tmp/dev/` and prints the setup code. Delete `tmp/dev` to start over. `make dev DEV_BIND=0.0.0.0` makes it reachable from other machines.
+
+## A development VM
+
+A Debian 13 VM can run everything CI does, including Docker clients and the install and update tests under systemd. With Claude Code Remote Control, work carries on while your own computer is off, and you steer it from the Claude desktop or iOS app.
+
+1. Create a Debian 13 VM (4 CPUs, 8 GB of memory and a 60 GB disk is plenty) with an SSH server and a normal user account. No desktop is needed.
+2. As that user, over SSH:
+   ```bash
+   curl -fsSLO https://raw.githubusercontent.com/bradyloveland/pbcmanager/main/scripts/dev-vm-setup.sh
+   sudo bash dev-vm-setup.sh --passwordless-sudo
+   ```
+   Leave out `--passwordless-sudo` if the VM is used for anything else; Claude then can't run the tests that need root.
+3. Follow the steps it prints: sign in to Claude and GitHub, then `sudo systemctl enable --now claude-remote-control`.
+
+The script installs Go, Docker, shellcheck, staticcheck, gh, tmux and the claude CLI, clones the repository to `~/pbcmanager`, and sets `DEV_BIND=0.0.0.0` so `make dev` on the VM can be opened from other machines. It's safe to run again to update them. Don't copy the release signing key to the VM: releases are built and signed by GitHub.
 
 ## Checks
 
