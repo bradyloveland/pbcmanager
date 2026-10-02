@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-10-01
+
 ### Fixed
 - Updates from the web UI now install every file in the release, going by its signed file list. Before, the running version installed a fixed list of files, so the update from 2.1.0 to 2.2.0 left out the ARM64 runner and ARM64 clients couldn't be set up ([#30](https://github.com/bradyloveland/pbcmanager/issues/30)). Going back to the previous version also removes files the update added.
 - The Updates page says when files of the running version are missing and can reinstall it from GitHub to put them back.
@@ -147,7 +149,8 @@ First public release.
 ### Added
 - Initial release: destinations, backup jobs with schedules, folder browser, exclusions, speed limits, encryption keys, live logs, run cancellation, snapshot listing, email failure alerts, HTTPS with a self-signed certificate, systemd installer.
 
-[Unreleased]: https://github.com/bradyloveland/pbcmanager/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/bradyloveland/pbcmanager/compare/v2.2.1...HEAD
+[2.2.1]: https://github.com/bradyloveland/pbcmanager/compare/v2.2.0...v2.2.1
 [2.2.0]: https://github.com/bradyloveland/pbcmanager/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/bradyloveland/pbcmanager/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/bradyloveland/pbcmanager/compare/v2.0.0...v2.0.1
