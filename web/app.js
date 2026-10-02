@@ -703,6 +703,7 @@ async function viewJobForm(id, token, presetClient) {
         <div class="share-head"><span>Folder</span><span></span><span>Archive name</span><span></span></div>
         <div class="shares" id="shares"></div>
         <button type="button" class="btn small mt-12" id="addshare">Add another folder</button>
+        <div id="mounts"></div>
       </fieldset>
       <fieldset class="section"><legend>Schedule</legend>
         <div class="seg mt-12" role="radiogroup" aria-label="How often">
@@ -750,17 +751,83 @@ async function viewJobForm(id, token, presetClient) {
       sh[inp.dataset.k] = inp.value;
       if (inp.dataset.k === "archive") sh.auto = false;
       if (inp.dataset.k === "path" && sh.auto) { sh.archive = archiveFrom(inp.value); inp.parentNode.querySelector("[data-k=archive]").value = sh.archive; }
+      if (inp.dataset.k === "path") drawMounts(false);
     }));
+    $$("#shares input[data-k=path]").forEach(inp => inp.addEventListener("change", () => drawMounts(true)));
     $$("[data-del]").forEach(b => b.addEventListener("click", () => { shares.splice(+b.dataset.del, 1); drawShares(); }));
     $$("[data-browse]").forEach(b => b.addEventListener("click", async () => {
       const cid = form.client_id.value;
       if (!cid) { toast("Choose the client first.", "bad"); return; }
       const sh = shares[+b.dataset.browse];
       const picked = await pickFolder(cid, sh.path || "/", true);
-      if (picked) { sh.path = picked; if (sh.auto || !sh.archive) { sh.archive = archiveFrom(picked); sh.auto = true; } drawShares(); }
+      if (picked) { sh.path = picked; if (sh.auto || !sh.archive) { sh.archive = archiveFrom(picked); sh.auto = true; } drawShares(); drawMounts(true); }
     }));
+    drawMounts(false);
+  };
+  // The client's filesystems: a backup stays on the filesystem of each
+  // folder, so other disks mounted inside one are listed with a way to add
+  // them, and a backup of "/" gets the usual excludes suggested.
+  let fsInfo = null, fsFor = "";
+  const cleanPath = p => { p = p.trim(); return p === "/" ? p : p.replace(/\/+$/, ""); };
+  const under = (m, p) => p === "/" ? m !== "/" : m.startsWith(p + "/");
+  const excludeLines = () => form.excludes.value.split("\n").map(x => x.trim()).filter(Boolean);
+  let rootDone = j.shares.some(sh => cleanPath(sh.path) === "/"), rootNote = "";
+  const addExcludes = list => {
+    const have = excludeLines();
+    const add = list.filter(x => !have.includes(x));
+    if (!add.length) return [];
+    form.excludes.value = [...have, ...add].join("\n");
+    $("details.adv", form).open = true;
+    return add;
+  };
+  const drawMounts = auto => {
+    const box = $("#mounts");
+    if (!box) return;
+    if (!fsInfo) { box.innerHTML = ""; return; }
+    const paths = shares.map(sh => cleanPath(sh.path)).filter(p => p.startsWith("/"));
+    const inside = fsInfo.mounts.filter(m => paths.some(p => under(m.path, p)) && !paths.includes(m.path));
+    const real = inside.filter(m => !m.virtual);
+    const virt = inside.filter(m => m.virtual && !inside.some(o => o !== m && o.virtual && under(m.path, o.path)));
+    let html = "";
+    const root = paths.includes("/");
+    if (root) {
+      if (auto && !rootDone) {
+        const added = addExcludes(fsInfo.root_excludes);
+        rootDone = true;
+        if (added.length) rootNote = `Added to <b>Skip these files and folders</b> (under More options): <span class="mono">${added.map(esc).join(", ")}</span>. Swap files, downloaded packages and temporary files don't need backing up. Remove any you want to keep.`;
+      }
+      const missing = fsInfo.root_excludes.filter(x => !excludeLines().includes(x));
+      if (rootNote && !missing.length) html += `<div class="result info mt-12">${rootNote}</div>`;
+      else if (missing.length) html += `<div class="result info mt-12">For a backup of the whole system, these are usually skipped: <span class="mono">${missing.map(esc).join(", ")}</span> (swap files, downloaded packages and temporary files).
+        <div class="btnrow mt-12"><button type="button" class="btn small" id="add-skips">Skip these</button></div></div>`;
+      if (fsInfo.docker) html += `<p class="hint mt-12">Docker keeps its data in <span class="mono">/var/lib/docker</span>. Images can be downloaded again, but volumes there may hold your data: either back it up, or skip it and add the volumes or compose folders you need as folders of their own.</p>`;
+    } else rootNote = "";
+    if (real.length) html += `<div class="mt-16"><h3>Other disks inside these folders</h3>
+      <p class="hint">A backup stays on the disk of the folder it's given, so these aren't included. Add the ones you want as folders of their own.</p>
+      <div class="tablewrap"><table><tbody>${real.map(m => `<tr><td><span class="mono">${esc(m.path)}</span><div class="sub">${esc(m.type)} · ${esc(m.source)}</div></td>
+        <td class="right"><button type="button" class="btn small" data-addmount="${esc(m.path)}">Add as a folder</button></td></tr>`).join("")}</tbody></table></div></div>`;
+    if (virt.length) html += `<p class="hint mt-12">Skipped, nothing to back up there: <span class="mono">${virt.slice(0, 8).map(m => esc(m.path)).join(", ")}</span>${virt.length > 8 ? ` and ${virt.length - 8} more` : ""}.</p>`;
+    box.innerHTML = html;
+    const sk = $("#add-skips");
+    if (sk) sk.onclick = () => { const added = addExcludes(fsInfo.root_excludes); rootNote = added.length ? `Added to <b>Skip these files and folders</b> (under More options): <span class="mono">${added.map(esc).join(", ")}</span>.` : ""; drawMounts(false); };
+    $$("[data-addmount]", box).forEach(b => b.onclick = () => {
+      const p = b.dataset.addmount;
+      const empty = shares.find(sh => !sh.path.trim());
+      if (empty) { empty.path = p; empty.archive = archiveFrom(p); empty.auto = true; } else shares.push({path: p, archive: archiveFrom(p), auto: true});
+      drawShares();
+    });
+  };
+  const loadFs = async () => {
+    const cid = form.client_id.value;
+    if (cid === fsFor) return;
+    fsFor = cid; fsInfo = null; drawMounts(false);
+    if (!cid) return;
+    try { const r = await api("GET", `/clients/${cid}/filesystems`); if (fsFor === cid) { fsInfo = r; drawMounts(false); } }
+    catch (_) { /* an older pbcm-runner, or the client is offline: just don't show it */ }
   };
   drawShares();
+  loadFs();
+  form.client_id.addEventListener("change", loadFs);
   $("#addshare").addEventListener("click", () => { shares.push({path: "", archive: "", auto: true}); drawShares(); $$("#shares input[data-k=path]").pop().focus(); });
   const readSched = () => ({type: form.stype.value, time: form.time.value || "02:00", days: $$("[name=day]:checked", form).map(c => +c.value), interval_hours: +form.interval.value});
   const syncSched = () => {

@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- The job form lists other disks mounted inside the chosen folders, such as a Raspberry Pi's `/boot/firmware`, a USB drive or a network share. Backups don't include them, and **Add as a folder** adds one as an archive of its own. When `/` is chosen, it adds the usual excludes (swap files, downloaded packages, temporary files) as lines you can edit ([#33](https://github.com/bradyloveland/pbcmanager/issues/33)).
+
 ## [2.2.1] - 2026-10-01
 
 ### Fixed

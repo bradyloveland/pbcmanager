@@ -162,6 +162,13 @@ func (s *Server) apiClientBrowse(w http.ResponseWriter, r *http.Request) (any, e
 	return l, clientError(err)
 }
 
+func (s *Server) apiClientFilesystems(w http.ResponseWriter, r *http.Request) (any, error) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	fs, err := s.clients.Filesystems(ctx, r.PathValue("id"))
+	return fs, clientError(err)
+}
+
 func (s *Server) apiClientRemove(w http.ResponseWriter, r *http.Request) (any, error) {
 	var in struct {
 		Uninstall   bool `json:"uninstall"`

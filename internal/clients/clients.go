@@ -538,6 +538,24 @@ func (m *Manager) Browse(ctx context.Context, id, path string) (*runner.Listing,
 	return &l, nil
 }
 
+// Filesystems reads a client's mounted filesystems and the excludes worth
+// suggesting for a backup of "/".
+func (m *Manager) Filesystems(ctx context.Context, id string) (*runner.Filesystems, error) {
+	c, err := m.store.GetClient(id)
+	if err != nil {
+		return nil, err
+	}
+	out, err := m.runnerCommand(ctx, c, "filesystems")
+	if err != nil {
+		return nil, err
+	}
+	var fs runner.Filesystems
+	if err := json.Unmarshal([]byte(out), &fs); err != nil {
+		return nil, fmt.Errorf("pbcm-runner sent an unexpected reply")
+	}
+	return &fs, nil
+}
+
 // Remove deletes a client. With uninstall it first removes everything setup
 // put on the client; that needs the client to be reachable.
 func (m *Manager) Remove(ctx context.Context, id string, uninstall, keepHistory bool) (string, error) {
