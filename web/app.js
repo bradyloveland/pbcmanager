@@ -418,7 +418,7 @@ function clientGroups(clients, jobs, sizes) {
           <span class="cgname"><b>${esc(c.name)}</b><span class="sub mono">${esc(c.address)}${c.port === 22 ? "" : ":" + esc(c.port)}</span></span>
           ${clientPill(c.status)}
           <span class="cgcounts">${counts.map(x => `<span class="${/failing/.test(x) ? "bad-text" : /running/.test(x) ? "busy-text" : ""}">${esc(x)}</span>`).join(" · ")}</span>
-          <span class="cgmeta sub">${esc(ago(c.last_contact))}${c.client_version ? ` · client ${esc(c.client_version)}` : ""}</span>
+          <span class="cgmeta sub">${esc(ago(c.last_contact))}${c.client_version ? ` · client ${esc(c.client_version)}` : ""}${pkgNote(c) ? ` · <span class="warn-text">${esc(pkgNote(c))}</span>` : ""}</span>
         </button>
         <a class="btn small" href="#/clients/${esc(c.id)}">Client details</a>
       </div>
@@ -963,6 +963,17 @@ async function viewRun(clientId, runId, token) {
 /* ---------- clients ---------- */
 const CLIENT_STATUS = {ready: ["ok", "Ready"], "setting-up": ["busy", "Setting up"], error: ["bad", "Needs attention"],
   unreachable: ["warn", "Can't connect"], "host-key-changed": ["bad", "Host key changed"]};
+// pkgNote says when a client's proxmox-backup-client has a newer version in
+// its package lists ("" if not). It's only reported: updates are installed
+// the way the rest of the machine is updated.
+function pkgNote(c, long) {
+  const p = c.package;
+  if (!p || !p.update_available) return "";
+  const v = p.info.candidate;
+  if (!long) return p.major ? `${v} available (major version)` : `update to ${v} available`;
+  return p.major ? `Version ${v} is available. It's a new major version, which usually comes with an upgrade of the operating system: check Proxmox's upgrade notes first.`
+    : `Version ${v} is available. Update it the way you update the rest of this machine.`;
+}
 const clientPill = st => { const [cls, label] = CLIENT_STATUS[st] || ["warn", st]; return `<span class="pill ${cls}">${esc(label)}</span>`; };
 function ago(ts) {
   if (!ts) return "never";
@@ -986,7 +997,7 @@ function clientsTable(clients) {
       <td><a class="jobname" href="#/clients/${esc(c.id)}">${esc(c.name)}</a><div class="sub mono">${esc(c.address)}${c.port === 22 ? "" : ":" + esc(c.port)}</div></td>
       <td>${clientPill(c.status)}</td>
       <td class="small">${esc(c.os_pretty || "—")}${c.arch ? `<div class="sub">${esc(c.arch)}</div>` : ""}</td>
-      <td class="small">${c.client_version ? esc(c.client_version) : "—"}</td>
+      <td class="small">${c.client_version ? esc(c.client_version) : "—"}${pkgNote(c) ? `<div class="sub warn-text">${esc(pkgNote(c))}</div>` : ""}</td>
       <td class="small">${esc(ago(c.last_contact))}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
@@ -1154,7 +1165,9 @@ async function viewClient(id, token) {
       <dt>System</dt><dd>${esc(c.os_pretty || "—")}${c.arch ? `, ${esc(c.arch)}` : ""}</dd>
       <dt>systemd</dt><dd>${esc(c.systemd_version || "—")}</dd>
       <dt>Time zone</dt><dd>${esc(c.timezone || "Unknown (schedules shown in this server's time)")}</dd>
-      <dt>Backup client</dt><dd>${c.client_version ? `proxmox-backup-client ${esc(c.client_version)}` : `<span class="muted">Not found</span>`}</dd>
+      <dt>Backup client</dt><dd>${c.client_version ? `proxmox-backup-client ${esc(c.client_version)}` : `<span class="muted">Not found</span>`}
+        ${pkgNote(c, true) ? `<div class="sub warn-text">${esc(pkgNote(c, true))}</div>` : ""}
+        ${c.package && c.package.info.lists_updated ? `<div class="sub">Package lists updated ${esc(ago(c.package.info.lists_updated))}, checked ${esc(ago(c.package.info.checked))}.</div>` : ""}</dd>
       <dt>pbcm-runner</dt><dd>${esc(c.runner_version || "—")}</dd>
       <dt>Last contact</dt><dd>${esc(ago(c.last_contact))}</dd>
       <dt>SSH host key</dt><dd class="mono break">${esc(c.host_key_fingerprint)}</dd>
@@ -1236,7 +1249,7 @@ async function viewClient(id, token) {
 
 /* ---------- alerts ---------- */
 const ALERT_KIND = {failed: "Backup failed", succeeded: "Backup succeeded", missed: "Backup didn't run", unreachable: "Can't reach client", reachable: "Client back",
-  full: "Destination nearly full", space_ok: "Destination has room"};
+  full: "Destination nearly full", space_ok: "Destination has room", client_update: "Client update waiting"};
 
 async function viewAlerts(token) {
   const [{settings: a, password_set}, {alerts}] = await Promise.all([api("GET", "/alerts/settings"), api("GET", "/alerts?limit=50")]);
@@ -1252,6 +1265,7 @@ async function viewAlerts(token) {
           ${check("on_missed", "When a scheduled backup doesn't run", "Checked once the server has heard from the client after the scheduled time.")}
           ${check("on_unreachable", "When a client can't be reached", "And again when it's back.")}
           ${check("on_full", "When a destination is nearly full", "Before backups to it start failing. And again once there's room.")}
+          ${check("on_client_update", "When a client's proxmox-backup-client has an update waiting", "Once per version, after the number of days below. PBC Manager only reports it; you install it the usual way.")}
           ${check("on_success", "When a backup succeeds", "Usually more email than you want; failures and missed backups are the ones to watch.")}
           ${check("plain_text", "Send plain-text emails only", "Alerts are laid out with a coloured status bar and a details table, with a plain-text version for mail apps that can't show it. Turn this on to send only the plain text.")}
         </div>
@@ -1262,6 +1276,8 @@ async function viewAlerts(token) {
             <small>Short network blips don't send email.</small></div>
           <div class="field"><label for="a-full"><span>Call a destination nearly full at</span></label><div class="unit"><input type="number" id="a-full" name="full_percent" value="${esc(a.full_percent)}" min="50" max="99"><span class="muted small">% used</span></div>
             <small>Space is checked every 15 minutes by default (see Settings).</small></div>
+          <div class="field"><label for="a-pkgdays"><span>Report a waiting client update after</span></label><div class="unit"><input type="number" id="a-pkgdays" name="client_update_days" value="${esc(a.client_update_days)}" min="1" max="365"><span class="muted small">days</span></div>
+            <small>Each client checks its package lists once a day.</small></div>
         </div>
       </fieldset>
       <fieldset class="section"><legend>Recipients</legend>
@@ -1292,7 +1308,7 @@ async function viewAlerts(token) {
       </tbody></table></div>` : `<p class="muted">No alerts yet.</p>`}</div>`);
   const f = $("#aform"), out = $("#a-result");
   const read = () => ({enabled: f.enabled.checked, on_failure: f.on_failure.checked, on_success: f.on_success.checked, on_missed: f.on_missed.checked,
-    on_unreachable: f.on_unreachable.checked, on_full: f.on_full.checked, plain_text: f.plain_text.checked, full_percent: Number(f.full_percent.value) || 0, missed_grace_minutes: Number(f.missed_grace_minutes.value) || 0, unreachable_minutes: Number(f.unreachable_minutes.value) || 0,
+    on_unreachable: f.on_unreachable.checked, on_full: f.on_full.checked, plain_text: f.plain_text.checked, on_client_update: f.on_client_update.checked, client_update_days: Number(f.client_update_days.value) || 0, full_percent: Number(f.full_percent.value) || 0, missed_grace_minutes: Number(f.missed_grace_minutes.value) || 0, unreachable_minutes: Number(f.unreachable_minutes.value) || 0,
     to: f.to.value, from: f.from.value, host: f.host.value, port: Number(f.port.value) || 0, security: f.security.value, username: f.username.value, password: f.password.value});
   f.security.addEventListener("change", () => { if ([25, 465, 587].includes(+f.port.value)) f.port.value = {starttls: 587, ssl: 465, none: 25}[f.security.value]; });
   f.addEventListener("submit", async e => {
@@ -1392,6 +1408,12 @@ async function viewUpdates(token) {
     ${u.rollback_to ? `<div class="panel"><h2>Go back to version ${esc(u.rollback_to)}</h2>
       <p class="hint">Puts back the previous version and the database as it was just before the update. Changes made since then (jobs, settings, run history collected by the server) are lost; clients keep their own run history.</p>
       <button class="btn danger" id="u-rollback">Go back to ${esc(u.rollback_to)}</button></div>` : ""}
+    ${u.clients.some(x => x.package && x.package.update_available) ? `<div class="panel"><h2>proxmox-backup-client updates</h2>
+      <p class="hint m-0 mb-14">These clients have a newer proxmox-backup-client in their package lists. PBC Manager doesn't install packages: update each one the way you update the rest of the machine (OpenMediaVault's Update Management, Proxmox VE's Updates page, or <span class="mono">apt update &amp;&amp; apt upgrade</span>).</p>
+      <div class="tablewrap"><table><thead><tr><th>Client</th><th>Installed</th><th>Available</th></tr></thead><tbody>
+      ${u.clients.filter(x => x.package && x.package.update_available).map(x => `<tr><td><a href="#/clients/${esc(x.id)}">${esc(x.name)}</a><div class="sub">${esc(x.os_pretty || "")}</div></td>
+        <td class="mono small nowrap">${esc(x.package.info.installed)}</td><td class="mono small"><span class="nowrap">${esc(x.package.info.candidate)}</span>${x.package.major ? ` <span class="pill warn">Major version</span>` : ""}</td></tr>`).join("")}
+      </tbody></table></div></div>` : ""}
     <div class="panel"><h2>Clients</h2><p class="hint m-0 mb-14">After the server updates, it sends the matching pbcm-runner to each client the next time it checks in. Each client checks the signature before replacing anything.</p>${runnerRows}</div>`);
 
   const progress = $("#u-progress");

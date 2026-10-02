@@ -265,6 +265,9 @@ func (n *Notifier) Check() {
 		if s.OnMissed && c.Status == store.ClientReady {
 			n.checkMissed(c, s, now)
 		}
+		if s.OnClientUpdate {
+			n.checkPackage(c, s, now)
+		}
 	}
 }
 
@@ -311,6 +314,33 @@ func (n *Notifier) checkMissed(c *store.Client, s Settings, now time.Time) {
 		n.deliver(&store.Alert{Key: fmt.Sprintf("missed:%s:%d", j.ID, due.Unix()), Kind: "missed", ClientID: c.ID, JobID: j.ID,
 			Subject: fmt.Sprintf("Backup didn't run: %s on %s", j.Name, c.Name)}, e)
 	}
+}
+
+// checkPackage emails when a client's proxmox-backup-client has had an update
+// waiting for longer than the chosen number of days. Each version is
+// reported once.
+func (n *Notifier) checkPackage(c *store.Client, s Settings, now time.Time) {
+	var p bundle.PackageInfo
+	if ok, err := n.Store.GetSize(bundle.PackageCache, c.ID, &p); !ok || err != nil || !p.UpdateAvailable() || p.AvailableSince == 0 ||
+		now.Sub(time.Unix(p.AvailableSince, 0)) < time.Duration(s.ClientUpdateDays)*24*time.Hour {
+		return
+	}
+	loc := c.Location()
+	e := &Email{Tone: "info", Label: "Client update waiting", Headline: fmt.Sprintf("%s has a newer proxmox-backup-client", c.Name), Paras: []string{
+		fmt.Sprintf("Version %s of %s has been available on %s since %s. It has %s installed.", p.Candidate, p.Package, c.Name, fmtTime(p.AvailableSince, loc), p.Installed),
+		"PBC Manager doesn't install packages itself. Update it the way you update the rest of that machine: OpenMediaVault's Update Management, Proxmox VE's Updates page, or apt update and apt upgrade."},
+		Rows: []Row{{Label: "Installed", Value: p.Installed}, {Label: "Available", Value: p.Candidate}}}
+	if p.MajorUpdate() {
+		e.Paras = append(e.Paras, "This is a new major version, which usually comes with an upgrade of the operating system. Check Proxmox's upgrade notes before installing it.")
+	}
+	if p.ListsUpdated > 0 {
+		e.Rows = append(e.Rows, Row{Label: "Package lists", Value: "updated " + fmtTime(p.ListsUpdated, loc)})
+	}
+	if l := n.link("/clients/" + c.ID); l != "" {
+		e.Link, e.LinkText = l, "Open the client"
+	}
+	n.deliver(&store.Alert{Key: fmt.Sprintf("pkg:%s:%s", c.ID, p.Candidate), Kind: "client_update", ClientID: c.ID,
+		Subject: fmt.Sprintf("Update waiting: proxmox-backup-client %s on %s", p.Candidate, c.Name)}, e)
 }
 
 // Space is told each new space reading for a destination. fullSince is

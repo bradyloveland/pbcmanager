@@ -316,6 +316,7 @@ func (m *Manager) SyncClient(ctx context.Context, clientID string) ([]*store.Run
 	m.syncSizes(ctx, c, st.Sizes)
 	if c.Status == store.ClientReady {
 		m.syncRunner(ctx, c, &st)
+		m.syncPackage(ctx, c, false)
 	}
 	if m.Sync.OnFinished != nil {
 		for _, r := range finished {

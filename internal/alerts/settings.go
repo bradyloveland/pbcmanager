@@ -39,6 +39,10 @@ type Settings struct {
 	UnreachableMinutes int    `json:"unreachable_minutes"`
 	OnFull             bool   `json:"on_full"`
 	FullPercent        int    `json:"full_percent"`
+	// OnClientUpdate emails when a client's proxmox-backup-client has had an
+	// update waiting for ClientUpdateDays.
+	OnClientUpdate   bool `json:"on_client_update"`
+	ClientUpdateDays int  `json:"client_update_days"`
 	// PlainText sends text-only emails instead of HTML with a text part.
 	PlainText bool `json:"plain_text"`
 }
@@ -47,7 +51,7 @@ type Settings struct {
 // missed backups, outages and nearly full destinations, but not successes.
 func Defaults() Settings {
 	return Settings{Port: 587, Security: "starttls", OnFailure: true, OnMissed: true, MissedGraceMinutes: 60,
-		OnUnreachable: true, UnreachableMinutes: 60, OnFull: true, FullPercent: 90}
+		OnUnreachable: true, UnreachableMinutes: 60, OnFull: true, FullPercent: 90, ClientUpdateDays: 14}
 }
 
 // Input is the settings form. An empty Password keeps the saved one.
@@ -123,6 +127,12 @@ func Clean(in Input, saved Settings) (Settings, error) {
 	}
 	if s.UnreachableMinutes < 5 || s.UnreachableMinutes > 10080 {
 		return s, bad("Wait between 5 minutes and 7 days before reporting a client that can't be reached.")
+	}
+	if s.ClientUpdateDays == 0 {
+		s.ClientUpdateDays = 14
+	}
+	if s.ClientUpdateDays < 1 || s.ClientUpdateDays > 365 {
+		return s, bad("Report a client's waiting update after between 1 and 365 days.")
 	}
 	if s.FullPercent == 0 {
 		s.FullPercent = 90

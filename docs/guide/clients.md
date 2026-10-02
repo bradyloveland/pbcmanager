@@ -38,6 +38,10 @@ Each client has its own copy of its jobs, as systemd timers, and the credentials
 
 **Remove** takes away everything setup added: timers, settings, credentials, `pbcm-runner`, the sudo rule and the `pbcm` account. Backups already on PBS are kept. If the client can't be reached, you can take it off the list instead, and later run `sudo /usr/local/lib/pbcm/pbcm-runner uninstall` on it.
 
+## proxmox-backup-client updates
+
+Clients get `proxmox-backup-client` updates through their own package updates, like any other package. PBC Manager never installs or upgrades packages. Each client checks its package lists once a day, without running `apt update`. When a newer version is listed, the Clients list, the client page and the Updates page say so. Update it the way you update the rest of that machine: OpenMediaVault's Update Management, Proxmox VE's Updates page, or `apt update && apt upgrade`. To be emailed about it, turn on **When a client's proxmox-backup-client has an update waiting** under **Alerts**.
+
 ## Folder sizes
 
 Clients measure each backed-up folder in the background at idle priority, every 12 hours by default. The Dashboard adds them up as **Data protected**. Change how often under **Settings → Sizes and space**, or press **Measure again**.

@@ -113,6 +113,8 @@ func Dispatch(env *Env, args []string) error {
 	case "version":
 		fmt.Fprintln(env.Stdout, version.Version)
 		return nil
+	case "package-info":
+		return PackageInfo(env)
 	case "detect":
 		info := Detect(env)
 		return json.NewEncoder(env.Stdout).Encode(info)

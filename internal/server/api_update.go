@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/bradyloveland/pbcmanager/internal/bundle"
 	"github.com/bradyloveland/pbcmanager/internal/clients"
 	"github.com/bradyloveland/pbcmanager/internal/config"
 	"github.com/bradyloveland/pbcmanager/internal/release"
@@ -62,6 +63,14 @@ func updateError(err error) error {
 	return nil
 }
 
+// packageView adds the conclusions the UI shows to a client's package info.
+func packageView(p *bundle.PackageInfo) map[string]any {
+	if p == nil {
+		return nil
+	}
+	return map[string]any{"info": p, "update_available": p.UpdateAvailable(), "major": p.MajorUpdate()}
+}
+
 var runnerLabel = map[string]string{
 	clients.RunnerCurrent:  "Up to date",
 	clients.RunnerUpdating: "Updating now",
@@ -84,7 +93,8 @@ func (s *Server) apiUpdate(w http.ResponseWriter, r *http.Request) (any, error) 
 	cl := make([]map[string]any, 0, len(list))
 	for _, c := range list {
 		st := s.clients.RunnerState(c.ID)
-		cl = append(cl, map[string]any{"id": c.ID, "name": c.Name, "runner_version": c.RunnerVersion, "runner_state": st, "runner_label": runnerLabel[st]})
+		cl = append(cl, map[string]any{"id": c.ID, "name": c.Name, "runner_version": c.RunnerVersion, "runner_state": st, "runner_label": runnerLabel[st],
+			"client_version": c.ClientVersion, "os_pretty": c.OSPretty, "package": packageView(s.clients.Package(c.ID))})
 	}
 	return map[string]any{
 		"version": version.Version, "arch": runtime.GOARCH, "cant_update": s.updater.CantUpdate(), "check": check, "newer": newer,

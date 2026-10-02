@@ -73,9 +73,11 @@ type Host struct {
 	files    map[string][]byte
 	rootKey  ssh.PublicKey
 	failWith string
-	active   map[string]chan struct{}
-	runs     sync.WaitGroup
-	client   string
+	// candidate is the newest proxmox-backup-client in the fake package lists.
+	candidate string
+	active    map[string]chan struct{}
+	runs      sync.WaitGroup
+	client    string
 }
 
 // NewSigner returns a fresh ed25519 key.
@@ -143,6 +145,14 @@ func (h *Host) AuthorizeRootKey(k ssh.PublicKey) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.rootKey = k
+}
+
+// OfferPackage makes the fake package lists offer this proxmox-backup-client
+// version ("" for the installed one, 3.4.1-1).
+func (h *Host) OfferPackage(version string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.candidate = version
 }
 
 // FailSetupWith makes setup.sh stop with this error.
@@ -366,6 +376,25 @@ func (h *Host) env(stdin io.Reader, stdout, stderr io.Writer) *runner.Env {
 			return "client version: 3.4.1\n", nil
 		case "systemctl":
 			return h.systemctl(args)
+		case "dpkg-query":
+			if args[len(args)-1] == "proxmox-backup-client" {
+				return "ii |3.4.1-1", nil
+			}
+			return "", errors.New("no packages found")
+		case "apt-cache":
+			h.mu.Lock()
+			cand := h.candidate
+			h.mu.Unlock()
+			if cand == "" {
+				cand = "3.4.1-1"
+			}
+			return "proxmox-backup-client:\n  Installed: 3.4.1-1\n  Candidate: " + cand + "\n", nil
+		case "dpkg":
+			// --compare-versions A gt B; the fake only offers newer versions.
+			if len(args) == 4 && args[1] != args[3] {
+				return "", nil
+			}
+			return "", errors.New("exit 1")
 		case "getent":
 			return "pbcm:x:999:999::/var/lib/pbcm:/bin/sh\n", nil
 		case "systemd-run":
