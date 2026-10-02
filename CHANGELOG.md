@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- Updates from the web UI now install every file in the release, going by its signed file list. Before, the running version installed a fixed list of files, so the update from 2.1.0 to 2.2.0 left out the ARM64 runner and ARM64 clients couldn't be set up ([#30](https://github.com/bradyloveland/pbcmanager/issues/30)). Going back to the previous version also removes files the update added.
+- The Updates page says when files of the running version are missing and can reinstall it from GitHub to put them back.
+
 ## [2.2.0] - 2026-10-01
 
 ### Added

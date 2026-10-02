@@ -264,7 +264,7 @@ func (m *Manager) runnerFile(arch string) string {
 func (m *Manager) readRunner(arch string) ([]byte, error) {
 	data, err := os.ReadFile(m.runnerFile(arch))
 	if err != nil {
-		return nil, fmt.Errorf("this server's copy of pbcm-runner for %s clients is missing (%s); reinstall the server", archName(arch), m.runnerFile(arch))
+		return nil, fmt.Errorf("this server's copy of pbcm-runner for %s clients is missing (%s). Open Updates and choose Reinstall this version, or run install.sh on the server again", archName(arch), m.runnerFile(arch))
 	}
 	return data, nil
 }

@@ -338,7 +338,11 @@ func (u *Updater) Discard() { os.RemoveAll(u.stagedDir()) }
 // Install swaps in the staged release. The caller then stops the server so
 // systemd starts the new version. Only newer versions are installed this
 // way; going back is Rollback.
-func (u *Updater) Install() (string, error) {
+func (u *Updater) Install() (string, error) { return u.install(false) }
+
+// install swaps in the staged release; same allows the running version
+// itself (Reinstall).
+func (u *Updater) install(same bool) (string, error) {
 	if why := u.CantUpdate(); why != "" {
 		return "", &InputError{why}
 	}
@@ -350,7 +354,7 @@ func (u *Updater) Install() (string, error) {
 	if err != nil {
 		return "", &InputError{"There's no checked release ready to install. Download or upload it again."}
 	}
-	if !u.Newer(m.Version) {
+	if !u.Newer(m.Version) && !(same && m.Version == u.Version) {
 		return "", &InputError{fmt.Sprintf("Version %s isn't newer than the running %s.", m.Version, u.Version)}
 	}
 	backups := filepath.Join(u.DataDir, "backups")
@@ -362,10 +366,12 @@ func (u *Updater) Install() (string, error) {
 		return "", fmt.Errorf("couldn't back up the database before updating: %w", err)
 	}
 	pruneBackups(backups)
-	if err := u.swapIn(u.stagedDir()); err != nil {
+	installed, added, err := u.swapIn(u.stagedDir(), m)
+	if err != nil {
 		return "", err
 	}
-	if err := writeState(u.DataDir, &State{Phase: Installed, From: u.Version, To: m.Version, Backup: backup, At: now()}); err != nil {
+	if err := writeState(u.DataDir, &State{Phase: Installed, From: u.Version, To: m.Version, Backup: backup, At: now(),
+		Files: installed, Added: added}); err != nil {
 		return "", err
 	}
 	u.Discard()
@@ -376,8 +382,8 @@ func (u *Updater) Install() (string, error) {
 // CanRollBack returns the version a manual rollback would go back to, or "".
 func (u *Updater) CanRollBack() string {
 	s, err := ReadState(u.DataDir)
-	if err != nil || s == nil || s.Phase == RolledBack || s.To != u.Version || !u.HasPrevious() {
-		return ""
+	if err != nil || s == nil || s.Phase == RolledBack || s.To != u.Version || s.From == s.To || !u.HasPrevious() {
+		return "" // nothing to go back to (a reinstall leaves the same version)
 	}
 	if _, err := os.Stat(s.Backup); err != nil {
 		return ""

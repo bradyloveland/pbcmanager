@@ -99,7 +99,7 @@ func (s *Server) apiUpdate(w http.ResponseWriter, r *http.Request) (any, error) 
 	return map[string]any{
 		"version": version.Version, "arch": runtime.GOARCH, "cant_update": s.updater.CantUpdate(), "check": check, "newer": newer,
 		"staged": s.updater.StagedRelease(), "rollback_to": s.updater.CanRollBack(), "last": state, "clients": cl,
-		"signed": s.ownSigned(),
+		"signed": s.ownSigned(), "missing": s.updater.Missing(),
 	}, nil
 }
 
@@ -165,6 +165,18 @@ func (s *Server) apiUpdateInstall(w http.ResponseWriter, r *http.Request) (any, 
 	}
 	s.requestRestart("")
 	return map[string]any{"restarting": true, "version": to}, nil
+}
+
+// apiUpdateReinstall downloads the running version again and installs it
+// over itself, to put back files an earlier update left out.
+func (s *Server) apiUpdateReinstall(w http.ResponseWriter, r *http.Request) (any, error) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+	defer cancel()
+	if err := s.updater.Reinstall(ctx); err != nil {
+		return nil, updateError(err)
+	}
+	s.requestRestart("")
+	return map[string]any{"restarting": true, "version": version.Version}, nil
 }
 
 func (s *Server) apiUpdateRollback(w http.ResponseWriter, r *http.Request) (any, error) {

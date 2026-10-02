@@ -29,6 +29,10 @@ If the web UI can't be reached at all after an update, run this on the server:
 sudo systemctl stop pbcm && sudo pbcm rollback && sudo systemctl start pbcm
 ```
 
+## "Some of this version's files are missing"
+
+Versions before 2.2.1 installed a fixed list of files, so an update to a release with a new file left that file out. Updating from 2.1.0 to 2.2.0, for example, skipped the ARM64 runner (`pbcm-runner-arm64`). The Updates page now checks the program folder against the version's signed file list and names anything missing. **Reinstall this version** downloads the same version from GitHub again, checks it and installs it over itself, keeping every setting. On a server without internet access, run `install.sh` from the release archive instead.
+
 ## Clients
 
 After the server updates, it sends the matching `pbcm-runner` to each client at its next check-in, within 5 minutes. The client checks the signature itself before replacing anything. The **Clients** section of the Updates page shows each one's version.

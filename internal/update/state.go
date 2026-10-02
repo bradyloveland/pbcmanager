@@ -33,6 +33,11 @@ type State struct {
 	Error  string `json:"error,omitempty"`
 	Reason string `json:"reason,omitempty"`
 	Manual bool   `json:"manual,omitempty"`
+	// Files are the program files the update installed, and Added those
+	// of them that weren't there before, so a rollback undoes exactly what
+	// it changed (2.2.1 and later).
+	Files []string `json:"files,omitempty"`
+	Added []string `json:"added,omitempty"`
 	// Failures counts how often the new version stopped with an error.
 	Failures int `json:"failures,omitempty"`
 	// Seen is set once the result has been shown and dismissed.

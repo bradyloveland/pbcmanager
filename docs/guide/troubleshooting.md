@@ -25,6 +25,10 @@ The client's SSH settings don't let the `pbcm` account in. On the client, run `s
 
 Then use **Repair**.
 
+## "This server's copy of pbcm-runner for ARM64 clients is missing"
+
+An update from a version before 2.2.1 left out a file that was new in the release. Open **Updates** and choose **Reinstall this version**, or run `install.sh` on the server again. Then use **Repair** on the client. See [Updates](updates.md).
+
 ## "On ARM64 … Proxmox only builds proxmox-backup-client for Debian 13"
 
 The client is an ARM64 machine, such as a Raspberry Pi, running an OS based on Debian 12. Proxmox only builds `proxmox-backup-client` for ARM64 on Debian 13, so move it to a Debian 13 based OS (Raspberry Pi OS based on Debian 13, or Debian 13 for ARM) and use **Repair**. If `uname -m` says `armv7l`, the OS is 32-bit; install a 64-bit one.
