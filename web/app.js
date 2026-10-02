@@ -590,7 +590,7 @@ function runsTable(items, showJob) {
       <td class="small">${esc(r.destination_name)}</td>
       <td class="small nowrap">${esc(fmtTime(r.started))}</td>
       <td class="small nowrap">${esc(dur(r.started, r.ended || null))}</td>
-      <td><div class="summary">${esc(r.summary || (r.status === "running" ? "In progress" : ""))}</div></td></tr>`).join("")}
+      <td><div class="summary">${esc(r.summary || (r.status === "running" ? "In progress" : ""))}</div>${statsLine(r.stats) ? `<div class="sub">${esc(statsLine(r.stats))}</div>` : ""}</td></tr>`).join("")}
   </tbody></table>`;
 }
 
@@ -904,6 +904,31 @@ async function viewActivity(token) {
   poll(draw, 8000);
 }
 
+// statsLine is a run's figures in a few words, for lists.
+function statsLine(st) {
+  if (!st || !(st.known || []).includes("sizes")) return "";
+  const parts = [`Read ${bytes(st.read)}`, `uploaded ${bytes(st.uploaded)}`];
+  if (st.read > 0 && (st.known || []).includes("reused")) parts.push(`reused ${Math.round(st.reused * 100 / st.read)}%`);
+  return parts.join(" · ");
+}
+// statsPanel is the run page's figures. Each row is a value and an optional
+// note, both escaped here.
+function statsPanel(st) {
+  if (!st || !(st.known || []).length) return "";
+  const has = x => st.known.includes(x), rows = [];
+  if (has("sizes")) {
+    rows.push(["Data read", bytes(st.read), ""]);
+    rows.push(["Uploaded", `${bytes(st.uploaded)} new data`, `${bytes(st.compressed)} compressed`]);
+  }
+  if (has("reused") && st.read > 0) rows.push(["Reused", bytes(st.reused), `from the last backup (${Math.round(st.reused * 100 / st.read)}%)`]);
+  if (has("files")) rows.push(["Files", String(st.files), `${st.changed} new or changed`]);
+  if (has("duration") && st.seconds > 0) rows.push(["Upload time", st.seconds < 1 ? "Under a second" : secs(Math.round(st.seconds)), ""]);
+  const per = st.archives && st.archives.length > 1 ? `<div class="tablewrap mt-12"><table><thead><tr><th>Archive</th><th>Read</th><th>Uploaded</th><th>Reused</th></tr></thead><tbody>
+    ${st.archives.map(a => `<tr><td class="mono small">${esc(a.name)}</td><td class="small">${esc(bytes(a.read))}</td><td class="small">${esc(bytes(a.uploaded))}</td><td class="small">${esc(bytes(a.reused))}</td></tr>`).join("")}</tbody></table></div>` : "";
+  return `<div class="panel mb-14"><h2>Backup figures</h2><dl class="kv">
+    ${rows.map(([label, value, note]) => `<dt>${esc(label)}</dt><dd>${esc(value)}${note ? ` <span class="sub">${esc(note)}</span>` : ""}</dd>`).join("")}</dl>${per}</div>`;
+}
+
 async function viewRun(clientId, runId, token) {
   let offset = 0, logText = "";
   render(`<a class="back" href="#/activity">‹ Activity</a>
@@ -918,7 +943,7 @@ async function viewRun(clientId, runId, token) {
     $("#run-sub").textContent = `${client_name} to ${r.destination_name}. ${r.trigger === "manual" ? "Started by hand" : "Scheduled"}, began ${fmtTime(r.started)}, ${r.status === "running" ? "running for " : "took "}${dur(r.started, r.ended || null)}.`;
     $("#run-actions").innerHTML = r.status === "running" ? `<button class="btn danger" data-cancel="${esc(r.job_id)}">Cancel run</button>` : `<a class="btn" href="#/jobs/${esc(r.job_id)}">View job</a>`;
     bindRunButtons(draw);
-    $("#run-summary").innerHTML = r.status === "failed" && r.summary ? `<div class="banner bad"><b>Why it failed:</b> ${esc(r.summary)}</div>` : "";
+    $("#run-summary").innerHTML = (r.status === "failed" && r.summary ? `<div class="banner bad"><b>Why it failed:</b> ${esc(r.summary)}</div>` : "") + statsPanel(r.stats);
     try {
       const d = await api("GET", `/runs/${clientId}/${runId}/log?offset=${offset}`);
       if (token !== routeToken) return;

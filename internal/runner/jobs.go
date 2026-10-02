@@ -508,6 +508,8 @@ func (e *Env) backupOne(job *bundle.Job, d bundle.Destination, r *bundle.Run, ca
 
 func (e *Env) finish(r *bundle.Run, status string, code *int, summary string) {
 	r.Status, r.ExitCode, r.Summary, r.Ended = status, code, summary, e.now().Unix()
+	// The client's summary lines are at the end of the log.
+	r.Stats = bundle.ParseStats(tail(filepath.Join(e.runDir(r.ID), "log"), 256<<10))
 	_ = e.saveRun(r)
 }
 

@@ -286,6 +286,8 @@ type Run struct {
 	Summary         string `json:"summary"`
 	Updated         int64  `json:"updated"`
 	LogSize         int64  `json:"log_size"`
+	// Stats are the backup's figures, when the client printed them.
+	Stats *Stats `json:"stats,omitempty"`
 }
 
 // FolderSize is a folder's measured size on a client.

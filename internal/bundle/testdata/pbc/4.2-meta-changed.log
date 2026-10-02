@@ -1,0 +1,17 @@
+Starting backup: host/gx/2026-10-02T00:49:42Z
+Client name: pbs
+Starting backup protocol: Fri Oct  2 00:49:42 2026
+Downloading previous manifest (Fri Oct  2 00:49:41 2026)
+Upload directory '/data/media' to 't@pbs!t@localhost:8007:store' as media.mpxar.didx
+Using previous index as metadata reference for 'media.mpxar.didx'
+Change detection summary:
+ - 40 total files (0 hardlinks)
+ - 22 unchanged, reusable files with 4.197 MiB data
+ - 18 changed or non-reusable files with 3.72 MiB data
+ - 390.672 KiB padding in 2 partially reused chunks
+media.mpxar: had to backup 5.559 KiB of 5.559 KiB (compressed 1.169 KiB) in 0.03 s (average 164.859 KiB/s)
+media.ppxar: reused 4.578 MiB from previous snapshot for unchanged files (4 chunks)
+media.ppxar: had to backup 3.72 MiB of 8.298 MiB (compressed 3.72 MiB) in 0.03 s (average 117.676 MiB/s)
+media.ppxar: backup was done incrementally, reused 4.578 MiB (55.2%)
+Duration: 0.13s
+End Time: Fri Oct  2 00:49:42 2026

@@ -1,0 +1,10 @@
+Starting backup: host/gx-legacy/2026-10-02T00:49:46Z
+Client name: pbs
+Starting backup protocol: Fri Oct  2 00:49:46 2026
+Downloading previous manifest (Fri Oct  2 00:49:45 2026)
+Upload directory '/data/media' to 't@pbs!t@localhost:8007:store' as media.pxar.didx
+media.pxar: had to backup 0 B of 7.92 MiB (compressed 0 B) in 0.03 s (average 0 B/s)
+media.pxar: backup was done incrementally, reused 7.92 MiB (100.0%)
+Uploaded backup catalog (720 B)
+Duration: 0.12s
+End Time: Fri Oct  2 00:49:47 2026
