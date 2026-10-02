@@ -124,6 +124,11 @@ func TestBackupsEndToEnd(t *testing.T) {
 	expect(t, r, 200, `"group":"host/`)
 	expect(t, r, 200, `"verified":"ok"`)
 
+	// Metrics: the run above counts towards the success rate.
+	r = c.get("/api/metrics")
+	expect(t, r, 200, `"succeeded":1`)
+	expect(t, r, 200, `"total":1`)
+
 	// Sizes: destination space and the newest backup come from the
 	// server's client; folder sizes are measured on the client.
 	waitFor(t, "sizes", 15*time.Second, func() bool {
@@ -163,7 +168,7 @@ func TestBackupsEndToEnd(t *testing.T) {
 func TestBackupEndpointsNeedSignIn(t *testing.T) {
 	e := newEnv(t, nil, true)
 	c := e.client()
-	for _, p := range []string{"/api/destinations", "/api/jobs", "/api/runs", "/api/jobs/x/snapshots", "/api/sizes"} {
+	for _, p := range []string{"/api/destinations", "/api/jobs", "/api/runs", "/api/jobs/x/snapshots", "/api/sizes", "/api/metrics"} {
 		expect(t, c.get(p), 401, "")
 	}
 	c.login()

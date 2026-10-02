@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Dashboard metric cards:**
+  - **Backup jobs:** how many, and how many are enabled, disabled and by hand only.
+  - **Success rate:** over 7 and 30 days, with runs per day for the last 14 days.
+  - **Largest backups** and **Longest running** (last 30 days): the top 5 of each.
+  - Cancelled runs don't count towards the rate. A card says so when run history doesn't reach back over its whole period. A new `GET /api/metrics` provides the numbers. ([#14](https://github.com/bradyloveland/pbcmanager/issues/14))
+
 ### Changed
 - **The Dashboard groups backup jobs under their client,** in sections you expand or collapse by clicking the client's header. Each header shows the client's status, a job counter (running, failing and disabled jobs included) and a **Client details** button. Your browser remembers which sections are open, and a client with a failing job or a connection problem always opens by itself. ([#13](https://github.com/bradyloveland/pbcmanager/issues/13))
 - **Jobs have an Enabled switch** next to their name at the top of the job page, so a job can be turned on or off without opening Edit job. It replaces the job form's "Run on schedule" checkbox, which read oddly next to a "By hand only" schedule. A disabled job doesn't run, on schedule or with Run now, and the job lists say **Disabled** instead of "Paused". ([#10](https://github.com/bradyloveland/pbcmanager/issues/10))

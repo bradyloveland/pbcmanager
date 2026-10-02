@@ -16,6 +16,15 @@ func (s *Server) apiSizes(w http.ResponseWriter, r *http.Request) (any, error) {
 	return map[string]any{"sizes": sum}, nil
 }
 
+// apiMetrics is the Dashboard's summary cards.
+func (s *Server) apiMetrics(w http.ResponseWriter, r *http.Request) (any, error) {
+	m, err := backups.ComputeMetrics(s.store, time.Now(), s.settingInt("history.server_runs"))
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"metrics": m}, nil
+}
+
 // apiSizesCheck asks for destination space and backup sizes to be checked
 // now: one destination, one job, or (with neither) everything.
 func (s *Server) apiSizesCheck(w http.ResponseWriter, r *http.Request) (any, error) {

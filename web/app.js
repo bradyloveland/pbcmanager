@@ -258,7 +258,7 @@ async function viewDashboard(token) {
     return;
   }
   const draw = async () => {
-    const [{jobs}, {sizes}, {destinations}, fresh] = await Promise.all([api("GET", "/jobs"), api("GET", "/sizes"), api("GET", "/destinations"), api("GET", "/clients")]);
+    const [{jobs}, {sizes}, {destinations}, fresh, {metrics}] = await Promise.all([api("GET", "/jobs"), api("GET", "/sizes"), api("GET", "/destinations"), api("GET", "/clients"), api("GET", "/metrics")]);
     if (token !== routeToken) return;
     clients = fresh.clients;
     const trouble = clients.filter(c => c.status !== "ready" && c.status !== "setting-up");
@@ -269,7 +269,7 @@ async function viewDashboard(token) {
     if (failing.length) title = failing.length === 1 ? `${failing[0].name} on ${failing[0].client_name} failed its last run` : `${failing.length} jobs failed their last run`;
     else if (!trouble.length && jobs.length) title = jobs.length === 1 ? "Your backup job is healthy" : `All ${jobs.length} backup jobs are healthy`;
     render(`<div class="health ${cls}"><span class="dot"></span><h1>${esc(title)}</h1></div>${updateNote}${twoStep}${jobs.length ? noAlerts : ""}
-      ${jobs.length ? sizeTiles(sizes, destinations, jobs, clients) : `<div class="panel empty"><h2>No backup jobs yet</h2><p>Your clients are ready. Add a destination for your Proxmox Backup Server, then create a job to choose folders and a schedule.</p><div class="btnrow"><a class="btn primary" href="#/jobs/new">Create a backup job</a><a class="btn" href="#/destinations/new">Add a destination</a></div></div>`}
+      ${jobs.length ? sizeTiles(sizes, destinations, jobs, clients) + metricCards(metrics) : `<div class="panel empty"><h2>No backup jobs yet</h2><p>Your clients are ready. Add a destination for your Proxmox Backup Server, then create a job to choose folders and a schedule.</p><div class="btnrow"><a class="btn primary" href="#/jobs/new">Create a backup job</a><a class="btn" href="#/destinations/new">Add a destination</a></div></div>`}
       <div class="pagehead mt-16 m-0"><h2 class="m-0">Clients and their backups</h2>${clients.length > 1 ? `<div class="btnrow"><button class="btn small" data-groups="open">Expand all</button><button class="btn small" data-groups="close">Collapse all</button></div>` : ""}</div>
       <div class="cgroups">${clientGroups(clients, jobs, sizes)}</div>`);
     bindClientGroups(draw);
@@ -277,6 +277,7 @@ async function viewDashboard(token) {
     bindRunButtons(draw);
     bindSizeButtons(draw);
     sizeMeters($("#view"));
+    drawBars($("#view"));
   };
   await draw();
   poll(draw, 10000);
@@ -341,6 +342,52 @@ function jobSize(js) {
   if (js.backup_bytes != null) return bytes(js.backup_bytes) + " last backup";
   return js.measuring ? "measuring…" : "";
 }
+
+/* ---------- metric cards (Dashboard) ---------- */
+// secs formats a duration in seconds: 45s, 12m 30s, 3h 05m.
+function secs(n) {
+  if (n == null) return "—";
+  const h = Math.floor(n / 3600), m = Math.floor((n % 3600) / 60), s = n % 60;
+  return h ? `${h}h ${String(m).padStart(2, "0")}m` : m ? `${m}m ${s}s` : `${s}s`;
+}
+const pct = p => p == null ? "—" : (p >= 99.95 ? "100" : p.toFixed(p >= 10 ? 0 : 1)) + "%";
+const rateClass = p => p == null ? "" : p >= 95 ? "ok-text" : p >= 80 ? "warn-text" : "bad-text";
+
+function metricCards(m) {
+  const j = m.jobs, w = m.week, mo = m.month;
+  const finished = w.succeeded + w.failed;
+  const jobsLine = [`${j.enabled} enabled`, j.disabled && `${j.disabled} disabled`, j.by_hand && `${j.by_hand} by hand only`].filter(Boolean).join(" · ");
+  const max = Math.max(1, ...m.daily.map(d => d.succeeded + d.failed));
+  const bars = m.daily.map(d => {
+    const label = `${new Date(d.day + "T12:00:00").toLocaleDateString([], {weekday: "short", month: "short", day: "numeric"})}: ${d.succeeded} succeeded, ${d.failed} failed`;
+    return `<span class="bar" title="${esc(label)}" aria-label="${esc(label)}" role="img">
+      <i class="bar-ok" data-h="${(d.succeeded / max * 100).toFixed(1)}"></i><i class="bar-bad" data-h="${(d.failed / max * 100).toFixed(1)}"></i></span>`;
+  }).join("");
+  const partial = r => r.partial ? `<div class="sub mt-8">Run history doesn't go back that far, so this covers the last ${plural(m.history.runs, "run")} the server keeps.</div>` : "";
+  const list = (rows, empty) => rows.length ? `<ol class="toplist">${rows.join("")}</ol>` : `<p class="muted m-0">${empty}</p>`;
+  return `<div class="tiles metrics">
+    <div class="panel"><div class="tilehead"><h2>Backup jobs</h2></div>
+      <div class="bignum">${j.total}</div>
+      <div class="sub">${esc(jobsLine)}</div>
+      <div class="sub mt-8">On ${plural(j.clients, "client")}, backing up to ${plural(j.destinations, "destination")}.</div></div>
+    <div class="panel"><div class="tilehead"><h2>Success rate</h2><span class="sub">last 7 days</span></div>
+      <div class="bignum ${rateClass(w.percent)}">${pct(w.percent)}</div>
+      <div class="sub">${finished ? `${w.succeeded} of ${plural(finished, "finished run")} succeeded${w.cancelled ? `, ${w.cancelled} cancelled` : ""}.` : "No backups have finished in the last 7 days."}</div>
+      <div class="sub">Last 30 days: <b class="${rateClass(mo.percent)}">${pct(mo.percent)}</b>${mo.succeeded + mo.failed ? ` of ${plural(mo.succeeded + mo.failed, "run")}` : ""}</div>
+      ${partial(mo)}
+      <div class="bars mt-12" aria-label="Runs per day, last 14 days">${bars}</div>
+      <div class="sub barlegend"><span><i class="key ok"></i>Succeeded</span><span><i class="key bad"></i>Failed</span><span class="muted">Last 14 days</span></div></div>
+    <div class="panel"><div class="tilehead"><h2>Largest backups</h2></div>
+      ${list(m.largest.map(x => `<li><a class="jobname" href="#/jobs/${esc(x.job_id)}">${esc(x.name)}</a> <span class="sub">${esc(x.client)}</span><b>${esc(bytes(x.bytes))}</b></li>`), "Sizes appear once folders are measured or the first backup is on PBS.")}
+      <div class="sub mt-8">The newest backup as PBS counts it, or the folders' size before the first backup.</div></div>
+    <div class="panel"><div class="tilehead"><h2>Longest running</h2><span class="sub">last 30 days</span></div>
+      ${list(m.longest.map(x => `<li><a class="jobname" href="#/jobs/${esc(x.job_id)}">${esc(x.name)}</a> <span class="sub">${esc(x.client)}</span>
+        <span class="toptime"><b>${esc(secs(x.avg_seconds))}</b> <span class="sub">average · <a href="#/activity/${esc(x.max_client_id)}/${esc(x.max_run_id)}">longest ${esc(secs(x.max_seconds))}</a></span></span></li>`), "Times appear after the first successful backup.")}
+    </div>
+  </div>`;
+}
+// drawBars sizes the daily bars (set from script: the CSP allows no inline styles).
+function drawBars(root) { $$(".bars i[data-h]", root).forEach(i => { i.style.height = i.dataset.h + "%"; }); }
 
 /* ---------- clients and their jobs (Dashboard) ---------- */
 // Which client sections are open is remembered in this browser only.

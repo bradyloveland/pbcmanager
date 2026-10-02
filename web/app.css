@@ -194,6 +194,23 @@ tr.clickable:hover td{background:var(--surface-2)}
 .ledger-head,.jobrow{display:grid;grid-template-columns:minmax(170px,1.3fr) minmax(200px,1.3fr) minmax(140px,1fr) minmax(130px,.9fr) 104px;gap:18px;align-items:center;padding:14px 20px}
 .ledger-head{font-size:12.5px;color:var(--muted);border-bottom:1px solid var(--line);padding-top:11px;padding-bottom:11px;background:var(--surface-2)}
 .jobrow + .jobrow{border-top:1px solid var(--line)}
+/* Dashboard: metric cards */
+.metrics .bignum{font-variant-numeric:tabular-nums}
+.toplist{list-style:none;margin:0;padding:0;counter-reset:top}
+.toplist li{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px}
+.toplist li:last-child{border-bottom:0}
+.toplist li::before{counter-increment:top;content:counter(top);color:var(--muted);font-variant-numeric:tabular-nums;width:1.2em}
+.toplist li > b,.toplist .toptime{margin-left:auto;font-variant-numeric:tabular-nums;white-space:nowrap}
+.bars{display:flex;align-items:flex-end;gap:4px;height:56px}
+.bar{flex:1;height:100%;display:flex;flex-direction:column-reverse;background:var(--surface-2);border-radius:3px;overflow:hidden;min-width:6px}
+.bar i{display:block;width:100%}
+.bar-ok{background:var(--ok)}
+.bar-bad{background:var(--bad)}
+.barlegend{display:flex;gap:14px;margin-top:6px;flex-wrap:wrap}
+.barlegend .key{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.barlegend .key.ok{background:var(--ok)}
+.barlegend .key.bad{background:var(--bad)}
+
 /* Dashboard: clients with their jobs, in collapsible sections */
 .cgroups{display:flex;flex-direction:column;gap:14px;margin-top:12px}
 .cgroup{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden}
