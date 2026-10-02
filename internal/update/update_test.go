@@ -49,10 +49,13 @@ func newEnv(t *testing.T, version string) *env {
 }
 
 // archive builds a signed release file.
-func (e *env) archive(t *testing.T, version, arch string, signed bool) []byte {
+func (e *env) archive(t *testing.T, version, arch string, signed bool, extra ...string) []byte {
 	t.Helper()
 	files := map[string]string{"pbcm": "pbcm " + version, "pbcm-runner": "runner " + version, "install.sh": "#!/bin/sh\n",
 		"CHANGELOG.md": "## [Unreleased]\n\n## [" + version + "] - 2026-10-01\n\n### Added\n- Something new.\n\n## [2.0.0] - 2026-09-01\n- Old.\n"}
+	for _, name := range extra { // files that are new in this release
+		files[name] = name + " " + version
+	}
 	m := &release.Manifest{Version: version, Arch: arch, Files: map[string]string{}}
 	for n, b := range files {
 		m.Files[n] = release.Hash([]byte(b))
@@ -301,4 +304,94 @@ func TestCheckAndDownload(t *testing.T) {
 func (u *Updater) as(v string) *Updater {
 	return &Updater{Files: u.Files, Store: u.Store, Version: v, Keys: u.Keys, API: u.API, Arch: u.Arch,
 		Supervised: u.Supervised, Executable: u.Executable}
+}
+
+func TestUpdateInstallsFilesNewInTheRelease(t *testing.T) {
+	e := newEnv(t, "2.1.0") // has pbcm and pbcm-runner, but no ARM64 runner
+	if _, err := e.u.Upload(bytes.NewReader(e.archive(t, "2.2.0", "amd64", true, "pbcm-runner-arm64", "pbcm-helper"))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.u.Install(); err != nil {
+		t.Fatal(err)
+	}
+	app := e.u.AppDir
+	for _, name := range []string{"pbcm-runner-arm64", "pbcm-helper", "MANIFEST", "MANIFEST.sig", "install.sh"} {
+		st, err := os.Stat(filepath.Join(app, name))
+		if err != nil {
+			t.Fatalf("%s wasn't installed", name)
+		}
+		if strings.HasPrefix(name, "pbcm-") && st.Mode()&0o111 == 0 {
+			t.Errorf("%s isn't executable", name)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(app, "CHANGELOG.md")); err == nil {
+		t.Error("documentation doesn't belong in the program folder")
+	}
+	s, _ := ReadState(e.u.DataDir)
+	if !strings.Contains(strings.Join(s.Added, ","), "pbcm-runner-arm64") || !strings.Contains(strings.Join(s.Files, ","), "pbcm-runner") {
+		t.Fatalf("state: %+v", s)
+	}
+	// Going back removes what the new version brought.
+	e.u.Store.Close()
+	if err := e.u.as("2.2.0").Rollback("test", true); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, app+"/pbcm") != "pbcm 2.1.0" || read(t, app+"/pbcm-runner") != "runner 2.1.0" {
+		t.Fatal("the old files are back")
+	}
+	for _, name := range []string{"pbcm-runner-arm64", "pbcm-helper"} {
+		if _, err := os.Stat(filepath.Join(app, name)); err == nil {
+			t.Errorf("%s should be removed by the rollback", name)
+		}
+	}
+}
+
+func TestMissingFilesAndReinstall(t *testing.T) {
+	e := newEnv(t, "2.2.0")
+	file := e.archive(t, "2.2.0", "amd64", true, "pbcm-runner-arm64")
+	// The running version's manifest, as installed, with the ARM64 runner
+	// missing from the program folder (an update by an older updater).
+	stage := t.TempDir() + "/x"
+	if _, err := release.Unpack(bytes.NewReader(file), stage, e.u.Keys); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"MANIFEST", "MANIFEST.sig"} {
+		raw, _ := os.ReadFile(filepath.Join(stage, name))
+		os.WriteFile(filepath.Join(e.u.AppDir, name), raw, 0o644)
+	}
+	if m := e.u.Missing(); len(m) != 2 || !strings.Contains(strings.Join(m, ","), "pbcm-runner-arm64") {
+		// install.sh is missing in this test's program folder too.
+		t.Fatalf("missing: %v", m)
+	}
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/releases/tags/v2.2.0":
+			fmt.Fprintf(w, `{"tag_name":"v2.2.0","assets":[{"name":"pbcm-2.2.0-linux-amd64.tar.gz","browser_download_url":"%s/file"}]}`, srv.URL)
+		case "/file":
+			w.Write(file)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	e.u.API = srv.URL
+	if err := e.u.Reinstall(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if m := e.u.Missing(); len(m) != 0 {
+		t.Fatalf("still missing: %v", m)
+	}
+	if read(t, e.u.AppDir+"/pbcm-runner-arm64") != "pbcm-runner-arm64 2.2.0" {
+		t.Fatal("the ARM64 runner is back")
+	}
+	if e.u.CanRollBack() != "" {
+		t.Fatal("a reinstall doesn't offer going back to the same version")
+	}
+	// A version that isn't on GitHub can't be reinstalled from there.
+	other := newEnv(t, "2.9.9")
+	other.u.API = srv.URL
+	if err := other.u.Reinstall(context.Background()); err == nil || !strings.Contains(err.Error(), "isn't published") {
+		t.Fatalf("unpublished version: %v", err)
+	}
 }

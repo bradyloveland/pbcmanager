@@ -83,6 +83,7 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/update/upload", s.apiLimit(true, maxUpload, s.apiUpdateUpload))
 	m.HandleFunc("POST /api/update/discard", priv(s.apiUpdateDiscard))
 	m.HandleFunc("POST /api/update/install", priv(s.apiUpdateInstall))
+	m.HandleFunc("POST /api/update/reinstall", priv(s.apiUpdateReinstall))
 	m.HandleFunc("POST /api/update/rollback", priv(s.apiUpdateRollback))
 	m.HandleFunc("POST /api/update/dismiss", priv(s.apiUpdateDismiss))
 

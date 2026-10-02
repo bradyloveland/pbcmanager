@@ -54,16 +54,23 @@ upload_install() { # archive version
   has '"restarting":true' -X POST "$base/update/install" || fail "install of $2 didn't start"
 }
 
+# Pretend A came without the ARM64 runner, as if it were new in B: the
+# update must install it (#30), and going back must remove it again.
+sudo rm /opt/pbcm/pbcm-runner-arm64
+has '"missing":["pbcm-runner-arm64"]' "$base/update" || fail "the Updates page should list the missing file"
+
 say "Updating to B"
 upload_install builds/b/pbcm-2.0.0-ci.2-linux-amd64.tar.gz 2.0.0-ci.2
 wait_for "B to run" 60 is_version 2.0.0-ci.2
 wait_for "B to be confirmed" 60 phase_is "done"
 test "$(sudo /opt/pbcm/pbcm.prev version)" = 2.0.0-ci.1 || fail "A should be kept as pbcm.prev"
+test -x /opt/pbcm/pbcm-runner-arm64 || fail "the update should install files that are new in B"
 
 say "Rolling back to A by hand"
 has '"restarting":true' -X POST "$base/update/rollback" || fail "rollback didn't start"
 wait_for "A to run again" 60 is_version 2.0.0-ci.1
 phase_is rolled_back || fail "the rollback should be recorded"
+test ! -e /opt/pbcm/pbcm-runner-arm64 || fail "going back should remove the file B added"
 
 say "Updating to B again"
 upload_install builds/b/pbcm-2.0.0-ci.2-linux-amd64.tar.gz 2.0.0-ci.2

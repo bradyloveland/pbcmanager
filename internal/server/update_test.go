@@ -21,10 +21,13 @@ import (
 	"github.com/bradyloveland/pbcmanager/internal/version"
 )
 
-func signedRelease(t *testing.T, priv ed25519.PrivateKey, v string) []byte {
+func signedRelease(t *testing.T, priv ed25519.PrivateKey, v string, extra ...string) []byte {
 	t.Helper()
 	files := map[string]string{"pbcm": "pbcm " + v, "pbcm-runner": "runner " + v,
 		"CHANGELOG.md": "## [" + v + "] - 2026-10-01\n- Faster.\n"}
+	for _, n := range extra {
+		files[n] = n + " " + v
+	}
 	m := &release.Manifest{Version: v, Arch: runtime.GOARCH, Files: map[string]string{}}
 	for n, b := range files {
 		m.Files[n] = release.Hash([]byte(b))
@@ -113,4 +116,58 @@ func TestUpdateFromGitHubAndUpload(t *testing.T) {
 		t.Fatal("the update page shows the update")
 	}
 	expect(t, c.post("/api/update/rollback", nil), 400, "no earlier version")
+}
+
+// An update made by an older version can leave out files that are new in
+// the release (#30). The Updates page lists them and puts them back.
+func TestReinstallMissingFiles(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	v := version.Version
+	file := signedRelease(t, priv, v, "pbcm-runner-arm64")
+	var gh *httptest.Server
+	gh = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/releases/tags/v" + v:
+			fmt.Fprintf(w, `{"tag_name":"v%s","assets":[{"name":"pbcm-%s-linux-%s.tar.gz","browser_download_url":"%s/file"}]}`, v, v, runtime.GOARCH, gh.URL)
+		case "/file":
+			w.Write(file)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer gh.Close()
+	// The program folder has this version's manifest, but not every file.
+	app := t.TempDir()
+	keys := []release.Key{{ID: "test", Pub: pub}}
+	unpacked := t.TempDir() + "/x"
+	if _, err := release.Unpack(bytes.NewReader(file), unpacked, keys); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"pbcm", "pbcm-runner", "MANIFEST", "MANIFEST.sig"} {
+		b, _ := os.ReadFile(filepath.Join(unpacked, n))
+		os.WriteFile(filepath.Join(app, n), b, 0o755)
+	}
+	e := newEnvOpts(t, nil, true, func(o *Options) {
+		o.AppDir, o.Executable, o.UpdateAPI = app, filepath.Join(app, "pbcm"), gh.URL
+		o.UpdateKeys = keys
+		o.Supervised = func() bool { return true }
+	})
+	c := e.client()
+	expect(t, c.post("/api/update/reinstall", nil), 401, "")
+	c.login()
+	expect(t, c.get("/api/update"), 200, `"missing":["pbcm-runner-arm64"]`)
+	expect(t, c.post("/api/update/reinstall", nil), 200, `"restarting":true`)
+	select {
+	case <-e.srv.Restarting():
+	case <-time.After(3 * time.Second):
+		t.Fatal("the server should restart after reinstalling")
+	}
+	if b, _ := os.ReadFile(filepath.Join(app, "pbcm-runner-arm64")); string(b) != "pbcm-runner-arm64 "+v {
+		t.Fatalf("reinstalled: %q", b)
+	}
+	r := c.get("/api/update")
+	expect(t, r, 200, `"rollback_to":""`)
+	if strings.Contains(r.body, `"missing":[`) {
+		t.Fatalf("nothing is missing now: %s", r.body)
+	}
 }

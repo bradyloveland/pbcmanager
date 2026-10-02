@@ -1372,8 +1372,8 @@ async function viewUpdates(token) {
   if (l && !l.seen) {
     if (l.phase === "rolled_back") lastHtml = `<div class="banner ${l.manual ? "warn" : "bad"}"><b>${l.manual ? `Went back to version ${esc(l.to)}.` : `The update to ${esc(l.from)} was undone.`}</b> ${esc(l.reason)}
       <div class="btnrow"><button class="btn small" id="u-dismiss">OK</button></div></div>`;
-    else if (l.phase === "done") lastHtml = `<div class="banner ok">Updated from ${esc(l.from)} to ${esc(l.to)}. <button class="btn small" id="u-dismiss">OK</button></div>`;
-    else if (l.phase === "installed" || l.phase === "confirming") lastHtml = `<div class="banner info">Version ${esc(l.to)} was just installed and is being checked. If it doesn't stay up, version ${esc(l.from)} is put back automatically.</div>`;
+    else if (l.phase === "done") lastHtml = `<div class="banner ok">${l.from === l.to ? `Version ${esc(l.to)} was reinstalled.` : `Updated from ${esc(l.from)} to ${esc(l.to)}.`} <button class="btn small" id="u-dismiss">OK</button></div>`;
+    else if (l.phase === "installed" || l.phase === "confirming") lastHtml = `<div class="banner info">${l.from === l.to ? `Version ${esc(l.to)} was just reinstalled and is being checked.` : `Version ${esc(l.to)} was just installed and is being checked. If it doesn't stay up, version ${esc(l.from)} is put back automatically.`}</div>`;
   }
   const latest = c.latest;
   let checkHtml;
@@ -1396,6 +1396,8 @@ async function viewUpdates(token) {
   render(`<h1>Updates</h1><p class="lede">New versions install in place and keep every setting. The server restarts for a few seconds; backups on clients carry on meanwhile.</p>
     ${lastHtml}
     ${u.cant_update ? `<div class="banner warn">${esc(u.cant_update)}</div>` : ""}
+    ${u.missing && u.missing.length ? `<div class="banner warn"><b>Some of this version's files are missing:</b> <span class="mono">${u.missing.map(esc).join(", ")}</span>. An update made by an older version can leave out files that are new in the release. Reinstall this version to put them back: it downloads ${esc(u.version)} from GitHub again and keeps every setting.
+      <div class="btnrow"><button class="btn small" id="u-reinstall" ${u.cant_update ? "disabled" : ""}>Reinstall this version</button></div><div id="u-reinstall-result"></div></div>` : ""}
     <div class="panel"><div class="pagehead m-0"><div><h2>Version ${esc(u.version)}</h2>
       <p class="sub">${c.checked ? `Checked ${esc(ago(c.checked))}` : "Never checked"}. <a href="#/settings">Daily checks and automatic updates</a> are in Settings.</p></div>
       <button class="btn" id="u-check">Check now</button></div>
@@ -1450,6 +1452,15 @@ async function viewUpdates(token) {
       if (!r.newer) { out.innerHTML = `<div class="result warn">That's version ${esc(r.staged.version)}, which isn't newer than the running ${esc(u.version)}, so it can't be installed.</div>`; await api("POST", "/update/discard"); return; }
       route();
     } catch (ex) { out.innerHTML = `<div class="result bad">${esc(ex.message)}</div>`; up.disabled = false; }
+  };
+  const re = $("#u-reinstall");
+  if (re) re.onclick = async () => {
+    if (!confirm(`Reinstall version ${u.version}? The server restarts for a few seconds.`)) return;
+    re.disabled = true;
+    const box = $("#u-reinstall-result");
+    box.innerHTML = `<div class="result info mt-12">Downloading and checking version ${esc(u.version)}…</div>`;
+    try { const r = await api("POST", "/update/reinstall"); box.innerHTML = `<div class="result info mt-12">Reinstalling. The server restarts in a moment…</div>`; waitForRestart(box, r.version); }
+    catch (ex) { box.innerHTML = `<div class="result bad mt-12">${esc(ex.message)}</div>`; re.disabled = false; }
   };
   const rb = $("#u-rollback");
   if (rb) rb.onclick = async () => {
