@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bradyloveland/pbcmanager/internal/backups"
 	"github.com/bradyloveland/pbcmanager/internal/bundle"
 	"github.com/bradyloveland/pbcmanager/internal/secret"
 	"github.com/bradyloveland/pbcmanager/internal/store"
@@ -245,6 +246,32 @@ func TestRunAlerts(t *testing.T) {
 	alerts, _ := e.st.ListAlerts(10)
 	if len(alerts) != 1 || alerts[0].SentAt == 0 || alerts[0].Kind != "failed" {
 		t.Fatalf("alert record %+v", alerts[0])
+	}
+}
+
+func TestRunAlertShowsBackupFigures(t *testing.T) {
+	e := newEnv(t)
+	on := Defaults()
+	on.Enabled, on.Host, on.From, on.To, on.OnSuccess = true, "smtp.example.net", "nas@example.net", "me@example.net", true
+	e.n.Settings = func() Settings { return on }
+	total, used, avail := int64(4<<40), int64(1<<40), int64(3<<40)
+	e.st.PutSize(backups.SizeDest, "d1", backups.Space{Total: &total, Used: &used, Avail: &avail, Checked: 1})
+	run := &store.Run{ClientID: "c1", Run: bundle.Run{ID: "r9", JobID: "j1", JobName: "media", DestinationID: "d1", DestinationName: "Home PBS",
+		Trigger: "schedule", Status: bundle.Success, Started: e.clock.Add(-time.Hour).Unix(), Ended: e.clock.Add(-50 * time.Minute).Unix(),
+		Summary: "Backup finished.", Stats: &bundle.Stats{Read: 25 << 30, Uploaded: 1 << 30, Compressed: 800 << 20, Reused: 24 << 30,
+			Files: 1200, Changed: 35, Seconds: 600, Known: []string{"sizes", "reused", "files", "duration"},
+			Archives: []bundle.ArchiveStats{{Name: "media", Read: 20 << 30, Uploaded: 1 << 30}, {Name: "photos", Read: 5 << 30}}}},
+		CollectedAt: e.clock.Add(-50 * time.Minute).Unix()}
+	e.n.RunFinished(client(), run)
+	msgs := e.messages()
+	if len(msgs) != 1 {
+		t.Fatalf("want one email, got %d", len(msgs))
+	}
+	for _, want := range []string{"Data read:    25 GiB", "Uploaded:     1.0 GiB new data (800 MiB compressed)", "Reused:       24 GiB from the last backup (96%)",
+		"Files:        1200, of which 35 new or changed", "Upload time:  10m0s", "media:", "photos:", "Space left:   3.0 TiB free of 4.0 TiB on the destination (25% used)"} {
+		if !strings.Contains(msgs[0], want) {
+			t.Errorf("missing %q:\n%s", want, msgs[0])
+		}
 	}
 }
 

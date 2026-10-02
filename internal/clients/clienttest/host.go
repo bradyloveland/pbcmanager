@@ -39,7 +39,11 @@ echo "repo=$PBS_REPOSITORY ns=$PBS_NAMESPACE"
 [ -f "$PBS_PASSWORD_FILE" ] || { echo "Error: no password file"; exit 1; }
 case "$*" in *fail*) echo "Error: connection refused"; exit 255;; esac
 case "$*" in *slow*) trap 'echo "stopping on SIGINT"; exit 130' INT; i=0; while [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done;; esac
-echo "Duration: 0.01s"
+for a in "$@"; do case "$a" in *.pxar:*) n="${a%%.pxar:*}"
+  echo "$n.mpxar: had to backup 12.5 KiB of 12.5 KiB (compressed 2.1 KiB) in 0.01 s (average 1.2 MiB/s)"
+  echo "$n.ppxar: had to backup 48.75 MiB of 1.25 GiB (compressed 31.2 MiB) in 0.4 s (average 121.9 MiB/s)"
+  echo "$n.ppxar: backup was done incrementally, reused 1.202 GiB (96.2%)";; esac; done
+echo "Duration: 0.42s"
 `
 
 // TB is the part of TB the host needs, so it can also run outside

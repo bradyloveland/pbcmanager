@@ -1,0 +1,9 @@
+Starting backup: host/hx/2026-10-02T00:50:48Z
+Client name: pbs
+Starting backup protocol: Fri Oct  2 00:50:48 2026
+No previous manifest available.
+Upload directory '/data/media' to 't@pbs!t@localhost:8007:store' as media.mpxar.didx
+media.ppxar: had to backup 7.63 MiB of 7.63 MiB (compressed 7.63 MiB) in 0.04 s (average 208.648 MiB/s)
+media.mpxar: had to backup 5.421 KiB of 5.421 KiB (compressed 1.068 KiB) in 0.04 s (average 134.303 KiB/s)
+Duration: 0.14s
+End Time: Fri Oct  2 00:50:48 2026

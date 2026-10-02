@@ -1,0 +1,10 @@
+Starting backup: host/hx-legacy/2026-10-02T00:50:53Z
+Client name: pbs
+Starting backup protocol: Fri Oct  2 00:50:54 2026
+Downloading previous manifest (Fri Oct  2 00:50:52 2026)
+Upload directory '/data/media' to 't@pbs!t@localhost:8007:store' as media.pxar.didx
+Error downloading .didx from previous manifest: Operation not supported (os error 95)
+media.pxar: had to backup 7.92 MiB of 7.92 MiB (compressed 7.92 MiB) in 0.04 s (average 195.241 MiB/s)
+Uploaded backup catalog (712 B)
+Duration: 0.13s
+End Time: Fri Oct  2 00:50:54 2026

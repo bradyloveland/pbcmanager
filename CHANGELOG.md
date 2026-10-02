@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Backup figures** for every run: data read, new data uploaded (and compressed), data reused from the last backup, files (total and new or changed), and the upload time. They're read from `proxmox-backup-client`'s own summary, so nothing extra runs on the client. They appear in alert emails, with the destination's free space, on the run page (per folder when a job has several), and in the job page's run list. Runs from before 2.1.0 don't have them. ([#17](https://github.com/bradyloveland/pbcmanager/issues/17))
 - **Dashboard metric cards:**
   - **Backup jobs:** how many, and how many are enabled, disabled and by hand only.
   - **Success rate:** over 7 and 30 days, with runs per day for the last 14 days.

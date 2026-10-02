@@ -137,6 +137,11 @@ func TestEndToEnd(t *testing.T) {
 	if r.Status != bundle.Success || r.ExitCode == nil || *r.ExitCode != 0 || !r.LogSaved {
 		t.Fatalf("real backup: %+v", r)
 	}
+	// The real client's summary lines are read into the run's figures.
+	if st := r.Stats; st == nil || st.Read <= 0 || st.Uploaded <= 0 || !st.Has("duration") {
+		t.Fatalf("backup figures from the real client: %+v", r.Stats)
+	}
+	t.Logf("figures: read %d, uploaded %d, reused %d, %d archive(s)", r.Stats.Read, r.Stats.Uploaded, r.Stats.Reused, len(r.Stats.Archives))
 	if snaps, err := pbs.Snapshots(ctx, d, ok.BackupID); err != nil || len(snaps) != 1 {
 		t.Fatalf("snapshot on PBS: %+v %v", snaps, err)
 	}

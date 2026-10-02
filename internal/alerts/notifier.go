@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bradyloveland/pbcmanager/internal/backups"
 	"github.com/bradyloveland/pbcmanager/internal/bundle"
 	"github.com/bradyloveland/pbcmanager/internal/store"
 )
@@ -135,6 +136,10 @@ func (n *Notifier) RunFinished(c *store.Client, r *store.Run) {
 		fmt.Fprintf(&b, "Exit code:    %d\n", *r.ExitCode)
 	}
 	fmt.Fprintf(&b, "Result:       %s\n", r.Summary)
+	writeStats(&b, r.Stats)
+	if sp := n.space(r.DestinationID); sp != "" {
+		fmt.Fprintf(&b, "Space left:   %s\n", sp)
+	}
 	if l := n.link("/activity/" + c.ID + "/" + r.ID); l != "" {
 		fmt.Fprintf(&b, "\nFull log: %s\n", l)
 	}
@@ -148,6 +153,41 @@ func (n *Notifier) RunFinished(c *store.Client, r *store.Run) {
 		subject += " (reported late)"
 	}
 	n.deliver(&store.Alert{Key: "run:" + c.ID + ":" + r.ID, Kind: verb, ClientID: c.ID, JobID: r.JobID, RunID: r.ID, Subject: subject}, b.String())
+}
+
+// writeStats adds the backup's figures, as far as the client printed them.
+func writeStats(b *strings.Builder, st *bundle.Stats) {
+	if st == nil {
+		return
+	}
+	b.WriteString("\n")
+	if st.Has("sizes") {
+		fmt.Fprintf(b, "Data read:    %s\n", Bytes(st.Read))
+		fmt.Fprintf(b, "Uploaded:     %s new data (%s compressed)\n", Bytes(st.Uploaded), Bytes(st.Compressed))
+	}
+	if st.Has("reused") && st.Read > 0 {
+		fmt.Fprintf(b, "Reused:       %s from the last backup (%.0f%%)\n", Bytes(st.Reused), st.ReusedPercent())
+	}
+	if st.Has("files") {
+		fmt.Fprintf(b, "Files:        %d, of which %d new or changed\n", st.Files, st.Changed)
+	}
+	if st.Has("duration") && st.Seconds > 0 {
+		fmt.Fprintf(b, "Upload time:  %s\n", (time.Duration(st.Seconds * float64(time.Second))).Round(time.Second/10))
+	}
+	if len(st.Archives) > 1 {
+		for _, a := range st.Archives {
+			fmt.Fprintf(b, "  %-12s read %s, uploaded %s\n", a.Name+":", Bytes(a.Read), Bytes(a.Uploaded))
+		}
+	}
+}
+
+// space describes a destination's free space from the last check, or "".
+func (n *Notifier) space(destID string) string {
+	var sp backups.Space
+	if ok, err := n.Store.GetSize(backups.SizeDest, destID, &sp); !ok || err != nil || sp.Error != "" || sp.Total == nil || sp.Avail == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s free of %s on the destination (%d%% used)", Bytes(*sp.Avail), Bytes(*sp.Total), sp.Percent())
 }
 
 func lastLines(path string, n int) string {

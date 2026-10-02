@@ -33,6 +33,8 @@ echo "secret=$(cat "$PBS_PASSWORD_FILE")"
 [ -n "$PBS_ENCRYPTION_PASSWORD_FILE" ] && echo "keypass=$(cat "$PBS_ENCRYPTION_PASSWORD_FILE")"
 case "$*" in *fail*) echo "Error: connection refused"; exit 255;; esac
 case "$*" in *slow*) trap 'echo "stopping on SIGINT"; exit 130' INT; i=0; while [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done;; esac
+echo "media.ppxar: had to backup 1.5 MiB of 6 MiB (compressed 1 MiB) in 0.02 s (average 75 MiB/s)"
+echo "media.ppxar: backup was done incrementally, reused 4.5 MiB (75.0%)"
 echo "Duration: 0.01s"
 `
 
@@ -235,6 +237,10 @@ func TestRunBacksUpToEachDestination(t *testing.T) {
 		seen[r.DestinationID] = r
 		if r.Status != bundle.Success || r.Trigger != "manual" || *r.ExitCode != 0 || r.Group != runs[0].Group {
 			t.Fatalf("run %+v", r)
+		}
+		// The client's summary lines are recorded with the run.
+		if st := r.Stats; st == nil || st.Read != 6<<20 || st.Uploaded != 3<<19 || st.Reused != 9<<19 || st.Archives[0].Name != "media" {
+			t.Fatalf("stats: %+v", r.Stats)
 		}
 	}
 	for dest, want := range map[string][]string{
