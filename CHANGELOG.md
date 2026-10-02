@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-10-01
+
 ### Added
 - The job form lists other disks mounted inside the chosen folders, such as a Raspberry Pi's `/boot/firmware`, a USB drive or a network share. Backups don't include them, and **Add as a folder** adds one as an archive of its own. When `/` is chosen, it adds the usual excludes (swap files, downloaded packages, temporary files) as lines you can edit ([#33](https://github.com/bradyloveland/pbcmanager/issues/33)).
 - Running backups show a progress bar with the percentage done and the time left on the Dashboard, the Backup jobs list, the client's page and the run page. The total is measured at the start of each run, using the job's excludes, at idle priority alongside the backup. Until then the previous run's size is used ([#34](https://github.com/bradyloveland/pbcmanager/issues/34)).
@@ -153,7 +155,8 @@ First public release.
 ### Added
 - Initial release: destinations, backup jobs with schedules, folder browser, exclusions, speed limits, encryption keys, live logs, run cancellation, snapshot listing, email failure alerts, HTTPS with a self-signed certificate, systemd installer.
 
-[Unreleased]: https://github.com/bradyloveland/pbcmanager/compare/v2.2.1...HEAD
+[Unreleased]: https://github.com/bradyloveland/pbcmanager/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/bradyloveland/pbcmanager/compare/v2.2.1...v2.3.0
 [2.2.1]: https://github.com/bradyloveland/pbcmanager/compare/v2.2.0...v2.2.1
 [2.2.0]: https://github.com/bradyloveland/pbcmanager/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/bradyloveland/pbcmanager/compare/v2.0.1...v2.1.0
