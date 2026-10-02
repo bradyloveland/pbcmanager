@@ -17,6 +17,14 @@ On the server:
 - **A backup's log:** open the run under **Activity**. Logs are copied to the server when a run finishes.
 - **On a client:** `journalctl -u 'pbcm-job@*'` shows its backup runs.
 
+## "Setup finished, but the server couldn't sign in as pbcm"
+
+The client's SSH settings don't let the `pbcm` account in. On the client, run `sshd -T | grep -iE '^(allow|deny)(users|groups)'` to see the limits:
+- **OpenMediaVault** (`allowgroups root _ssh`): run `usermod -aG _ssh pbcm`. Setup does this itself from version 2.0.1.
+- **`allowusers …`:** add `pbcm` to the `AllowUsers` line in `/etc/ssh/sshd_config`, then run `systemctl reload ssh`.
+
+Then use **Repair**.
+
 ## A client shows "Can't reach"
 
 The server couldn't open SSH to it. Check that the machine is on, that SSH is running, and that the network or VPN between them works. Backups on the client keep running meanwhile, and the results are collected when it's back.
