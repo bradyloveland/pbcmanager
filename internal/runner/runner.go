@@ -51,6 +51,9 @@ type Env struct {
 	// ClientBin overrides proxmox-backup-client (tests).
 	ClientBin string
 	Now       func() time.Time
+	// Arch is the CPU type this runner was built for (runtime.GOARCH unless
+	// set; tests pretend to be another).
+	Arch string
 }
 
 func (e *Env) path(p string) string { return filepath.Join(e.Root, p) }

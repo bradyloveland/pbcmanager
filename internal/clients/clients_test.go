@@ -642,3 +642,59 @@ func TestPackageUpdatesAreNoticed(t *testing.T) {
 		}
 	}
 }
+
+func TestARM64ClientGetsTheARM64Runner(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	saved := release.Keys
+	release.Keys = []release.Key{{ID: "test", Pub: pub}}
+	t.Cleanup(func() { release.Keys = saved })
+
+	h := newHarness(t)
+	os.WriteFile(h.m.runnerPath+"-arm64", []byte("RUNNER-ARM64"), 0o755)
+	h.host.SetMachine("aarch64")
+	c, v := h.add(t, Login{User: "root", Password: rootPW})
+	if !v.OK {
+		t.Fatalf("setup: %+v", v)
+	}
+	if b, _ := os.ReadFile(h.host.Path(runner.Path)); string(b) != "RUNNER-ARM64" {
+		t.Fatalf("an ARM64 client gets the ARM64 runner, got %q", b)
+	}
+	if !strings.Contains(strings.Join(v.Lines, "\n"), "pbcm-runner for ARM64") {
+		t.Fatalf("setup log: %v", v.Lines)
+	}
+	if s := h.m.RunnerState(c.ID); s != RunnerCurrent {
+		t.Fatalf("runner state: %s", s)
+	}
+
+	// A signed release updates it with the ARM64 build, never the x86-64 one.
+	newARM, newAMD := []byte("RUNNER-ARM64-2"), []byte("RUNNER-AMD64-2")
+	os.WriteFile(h.m.runnerPath, newAMD, 0o755)
+	os.WriteFile(h.m.runnerPath+"-arm64", newARM, 0o755)
+	man := (&release.Manifest{Version: "2.2.0", Arch: "amd64", Files: map[string]string{
+		"pbcm-runner": release.Hash(newAMD), "pbcm-runner-arm64": release.Hash(newARM)}}).Encode()
+	dir := filepath.Dir(h.m.runnerPath)
+	os.WriteFile(filepath.Join(dir, "MANIFEST"), man, 0o644)
+	os.WriteFile(filepath.Join(dir, "MANIFEST.sig"), release.Sign("test", priv, man), 0o644)
+	h.m.runnerCache = nil
+	h.m.SyncClient(context.Background(), c.ID)
+	if b, _ := os.ReadFile(h.host.Path(runner.Path)); string(b) != "RUNNER-ARM64-2" {
+		t.Fatalf("after the update the client has %q", b)
+	}
+
+	// Without an ARM64 runner on the server, setup says so.
+	h2 := newHarness(t)
+	h2.host.SetMachine("aarch64")
+	_, v = h2.add(t, Login{User: "root", Password: rootPW})
+	if v.OK || !strings.Contains(v.Error, "pbcm-runner for ARM64 clients is missing") {
+		t.Fatalf("missing ARM64 runner: %+v", v)
+	}
+}
+
+func TestUnsupportedCPUIsRefused(t *testing.T) {
+	h := newHarness(t)
+	h.host.SetMachine("armv7l")
+	_, v := h.add(t, Login{User: "root", Password: rootPW})
+	if v.OK || !strings.Contains(v.Error, "this machine's CPU is armv7l") || !strings.Contains(v.Error, "64-bit OS") {
+		t.Fatalf("32-bit ARM: %+v", v)
+	}
+}

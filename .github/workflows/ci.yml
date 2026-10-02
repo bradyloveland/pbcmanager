@@ -34,8 +34,9 @@ jobs:
   clients:
     # Sets up real Debian 12/13 and Ubuntu machines (containers with an SSH
     # server) as clients: installs proxmox-backup-client from Proxmox, creates
-    # the pbcm account and sudo rule, browses, repairs and uninstalls.
-    runs-on: ubuntu-latest
+    # the pbcm account and sudo rule, browses, repairs and uninstalls. The
+    # ARM64 entry runs on GitHub's ARM64 runner, so the container is native.
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -45,6 +46,8 @@ jobs:
           - {image: "ubuntu:24.04", user: alice, extra: sudo, expect: "static build"}
           # Like OpenMediaVault: only root and the _ssh group may sign in.
           - {image: "debian:bookworm", user: root, ssh_group: _ssh, expect: "Added pbcm to the _ssh group"}
+          # ARM64 (like a Raspberry Pi): Debian 13, with Proxmox's arm64 build.
+          - {image: "debian:trixie", user: root, os: ubuntu-24.04-arm, arch: aarch64, expect: "Using Proxmox's ARM64 build"}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -87,8 +90,10 @@ jobs:
           PBCM_IT_USER: ${{ matrix.user }}
           PBCM_IT_PASSWORD: ci-root-password
           PBCM_IT_EXPECT: ${{ matrix.expect }}
+          PBCM_IT_ARCH: ${{ matrix.arch }}
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$RUNNER_TEMP/pbcm-runner" ./cmd/pbcm-runner
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o "$RUNNER_TEMP/pbcm-runner-arm64" ./cmd/pbcm-runner
           PBCM_IT_RUNNER="$RUNNER_TEMP/pbcm-runner" go test -count=1 -v -run TestRealClient ./internal/clients/
       - name: Container log
         if: failure()
@@ -213,6 +218,7 @@ jobs:
           sudo ./install.sh --skip-client | tee install.log
           grep -q "Setup code:" install.log
           test -x /opt/pbcm/pbcm-runner
+          test -x /opt/pbcm/pbcm-runner-arm64
       - name: Serves HTTPS and asks for setup
         run: |
           curl -fsk https://127.0.0.1:8099/api/health

@@ -23,7 +23,7 @@ func TestSelfUpdateChecksTheSignature(t *testing.T) {
 	os.MkdirAll(je.path("/usr/local/lib/pbcm"), 0o755)
 	os.WriteFile(je.path(Path), []byte("old runner"), 0o755)
 	newRunner := []byte("new runner")
-	m := (&release.Manifest{Version: "2.1.0", Arch: "amd64", Files: map[string]string{"pbcm-runner": release.Hash(newRunner)}}).Encode()
+	m := (&release.Manifest{Version: "2.1.0", Arch: "amd64", Files: map[string]string{je.OwnFile(): release.Hash(newRunner)}}).Encode()
 	req := func(sig []byte, runner []byte) *bytes.Reader {
 		raw, _ := json.Marshal(UpdateRequest{Manifest: string(m), Signature: string(sig), Runner: runner})
 		return bytes.NewReader(raw)
@@ -40,6 +40,17 @@ func TestSelfUpdateChecksTheSignature(t *testing.T) {
 		if b, _ := os.ReadFile(je.path(Path)); string(b) != "old runner" {
 			t.Fatalf("%s: runner was replaced", name)
 		}
+	}
+	// A release whose runner for this CPU type is missing (only the other
+	// type's is listed) is refused, so the wrong build is never installed.
+	other := "pbcm-runner-arm64"
+	if je.OwnFile() != "pbcm-runner" {
+		other = "pbcm-runner"
+	}
+	wrong := (&release.Manifest{Version: "2.1.0", Arch: "amd64", Files: map[string]string{other: release.Hash(newRunner)}}).Encode()
+	raw, _ := json.Marshal(UpdateRequest{Manifest: string(wrong), Signature: string(release.Sign("test", priv, wrong)), Runner: newRunner})
+	if err := SelfUpdate(je.Env, bytes.NewReader(raw)); err == nil {
+		t.Fatal("a runner for the other CPU type must be refused")
 	}
 	je.out.Reset()
 	if err := SelfUpdate(je.Env, req(release.Sign("test", priv, m), newRunner)); err != nil {

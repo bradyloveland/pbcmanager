@@ -42,6 +42,7 @@ A self-hosted web UI for file-level backups with `proxmox-backup-client`. One ce
 - **Server:** Debian 12 or 13 on x86-64 or ARM64. A small LXC container on Proxmox VE works well.
 - **Clients:**
   - Debian 12 or 13, or a system based on them, on x86-64. That includes Proxmox VE, OpenMediaVault and Ubuntu.
+  - Or ARM64 (aarch64), such as a Raspberry Pi with a 64-bit OS, based on Debian 13.
   - Reachable over SSH from the server, on your LAN or a VPN.
 - **Proxmox Backup Server** with an API token for each client.
 

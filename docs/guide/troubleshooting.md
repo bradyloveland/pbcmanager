@@ -25,6 +25,10 @@ The client's SSH settings don't let the `pbcm` account in. On the client, run `s
 
 Then use **Repair**.
 
+## "On ARM64 … Proxmox only builds proxmox-backup-client for Debian 13"
+
+The client is an ARM64 machine, such as a Raspberry Pi, running an OS based on Debian 12. Proxmox only builds `proxmox-backup-client` for ARM64 on Debian 13, so move it to a Debian 13 based OS (Raspberry Pi OS based on Debian 13, or Debian 13 for ARM) and use **Repair**. If `uname -m` says `armv7l`, the OS is 32-bit; install a 64-bit one.
+
 ## A client shows "Can't reach"
 
 The server couldn't open SSH to it. Check that the machine is on, that SSH is running, and that the network or VPN between them works. Backups on the client keep running meanwhile, and the results are collected when it's back.

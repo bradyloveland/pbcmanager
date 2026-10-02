@@ -64,10 +64,20 @@ fetch_key() {
 }
 
 # ---- proxmox-backup-client ---------------------------------------------------
+# Proxmox builds the client for x86-64, and for ARM64 only for Debian 13, in
+# the test component of its pbs-client repository. ARM64 clients therefore
+# need a Debian 13 base, and only Proxmox's own build is used on them.
+case "$ARCH" in
+  x86_64) COMPONENTS=main ;;
+  aarch64)
+    [ "$BASE" = trixie ] || fail "On ARM64 (such as a Raspberry Pi), Proxmox only builds proxmox-backup-client for Debian 13, and $OS_PRETTY is based on Debian 12. Move this machine to a Debian 13 based OS, such as Raspberry Pi OS based on Debian 13, then use Repair."
+    COMPONENTS="main test"
+    ;;
+  *) fail "proxmox-backup-client is made for x86-64 and ARM64 (aarch64) machines, and this one is $ARCH. On a Raspberry Pi, use a 64-bit OS." ;;
+esac
 if command -v proxmox-backup-client >/dev/null 2>&1; then
   step "proxmox-backup-client is already installed: $(proxmox-backup-client version 2>/dev/null | head -n1)"
 else
-  [ "$ARCH" = x86_64 ] || fail "proxmox-backup-client is only made for x86-64 machines, and this one is $ARCH."
   step "Installing proxmox-backup-client"
   apt_install ca-certificates curl
   if [ "$OS_ID" = debian ]; then
@@ -79,7 +89,8 @@ else
     step "$OS_PRETTY is based on Debian $BASE, so using Proxmox's static build"
   fi
   fetch_key
-  echo "deb [signed-by=$KEYRING] http://download.proxmox.com/debian/pbs-client $BASE main" \
+  [ "$ARCH" = aarch64 ] && step "Using Proxmox's ARM64 build, from the test component of its Debian 13 repository"
+  echo "deb [signed-by=$KEYRING] http://download.proxmox.com/debian/pbs-client $BASE $COMPONENTS" \
     > /etc/apt/sources.list.d/pbcm-pbs-client.list
   APT_UPDATED=0
   apt_install "$PKG"

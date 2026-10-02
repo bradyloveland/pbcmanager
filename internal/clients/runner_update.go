@@ -25,26 +25,40 @@ type serverRunner struct {
 	signed    bool
 }
 
-func (m *Manager) ownRunner() *serverRunner {
+// ownRunner is this server's pbcm-runner for clients of a CPU type.
+func (m *Manager) ownRunner(arch string) *serverRunner {
 	m.busyMu.Lock()
 	defer m.busyMu.Unlock()
-	if m.runnerCache != nil {
-		return m.runnerCache
+	if r := m.runnerCache[arch]; r != nil {
+		return r
 	}
 	r := &serverRunner{}
-	data, err := os.ReadFile(m.runnerPath)
+	path := m.runnerFile(arch)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return r // not cached: it may appear later
 	}
 	r.data, r.hash = data, release.Hash(data)
-	dir := filepath.Dir(m.runnerPath)
+	dir := filepath.Dir(path)
 	r.manifest, _ = os.ReadFile(filepath.Join(dir, "MANIFEST"))
 	r.signature, _ = os.ReadFile(filepath.Join(dir, "MANIFEST.sig"))
-	if man, err := release.Verify(r.manifest, r.signature, release.Keys); err == nil && man.Check("pbcm-runner", data) == nil {
+	if man, err := release.Verify(r.manifest, r.signature, release.Keys); err == nil && man.Check(filepath.Base(path), data) == nil {
 		r.signed = true
 	}
-	m.runnerCache = r
+	if m.runnerCache == nil {
+		m.runnerCache = map[string]*serverRunner{}
+	}
+	m.runnerCache[arch] = r
 	return r
+}
+
+// archOf is a client's CPU type, from what it reported ("x86_64" before
+// it was known).
+func archOf(c *store.Client) string {
+	if a := clientArch(c.Arch); a != "" {
+		return a
+	}
+	return ArchAMD64
 }
 
 // Runner states shown for each client.
@@ -62,7 +76,11 @@ func (m *Manager) RunnerState(clientID string) string {
 	hash, seen := m.runnerHashes[clientID]
 	updating := m.runnerUpdating[clientID]
 	m.busyMu.Unlock()
-	own := m.ownRunner()
+	arch := ArchAMD64
+	if c, err := m.store.GetClient(clientID); err == nil {
+		arch = archOf(c)
+	}
+	own := m.ownRunner(arch)
 	switch {
 	case updating:
 		return RunnerUpdating
@@ -79,7 +97,7 @@ func (m *Manager) RunnerState(clientID string) string {
 // syncRunner records the client's runner and sends this server's if it differs.
 func (m *Manager) syncRunner(ctx context.Context, c *store.Client, st *bundle.Status) {
 	m.noteRunner(c.ID, st.Runner)
-	own := m.ownRunner()
+	own := m.ownRunner(archOf(c))
 	if st.Runner == "" || own.hash == "" || st.Runner == own.hash || !own.signed {
 		return
 	}

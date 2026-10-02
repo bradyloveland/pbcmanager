@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"runtime"
 
 	"github.com/bradyloveland/pbcmanager/internal/release"
 )
@@ -29,13 +30,32 @@ func SelfUpdate(env *Env, in io.Reader) error {
 	if err != nil {
 		return err
 	}
-	if err := m.Check("pbcm-runner", req.Runner); err != nil {
+	// Only the build for this CPU type is accepted, so the wrong one can
+	// never replace the runner.
+	if err := m.Check(env.OwnFile(), req.Runner); err != nil {
 		return err
 	}
 	if err := writeAtomic(env.path(Path), req.Runner, 0o755); err != nil {
 		return err
 	}
 	return json.NewEncoder(env.Stdout).Encode(map[string]string{"version": m.Version, "hash": release.Hash(req.Runner)})
+}
+
+// FileFor is the runner's name in a release for a CPU type: pbcm-runner for
+// x86-64, and pbcm-runner-<arch> for others.
+func FileFor(arch string) string {
+	if arch == "amd64" {
+		return "pbcm-runner"
+	}
+	return "pbcm-runner-" + arch
+}
+
+// OwnFile is this runner's name in a release.
+func (e *Env) OwnFile() string {
+	if e.Arch != "" {
+		return FileFor(e.Arch)
+	}
+	return FileFor(runtime.GOARCH)
 }
 
 // selfHash identifies the installed runner, so the server can tell when it

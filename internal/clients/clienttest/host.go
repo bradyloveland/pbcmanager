@@ -75,6 +75,8 @@ type Host struct {
 	failWith string
 	// candidate is the newest proxmox-backup-client in the fake package lists.
 	candidate string
+	// uname is what "uname -m" says (x86_64 unless set).
+	uname string
 	// refusePbcm makes sshd turn the pbcm account away, as OpenMediaVault's
 	// "AllowGroups root _ssh" does for an account outside those groups.
 	refusePbcm bool
@@ -148,6 +150,22 @@ func (h *Host) AuthorizeRootKey(k ssh.PublicKey) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.rootKey = k
+}
+
+// SetMachine makes the fake report this CPU type ("uname -m"), such as aarch64.
+func (h *Host) SetMachine(uname string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.uname = uname
+}
+
+func (h *Host) machine() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.uname == "" {
+		return "x86_64"
+	}
+	return h.uname
 }
 
 // OfferPackage makes the fake package lists offer this proxmox-backup-client
@@ -326,6 +344,11 @@ func (h *Host) exec(user, cmd string, stdin []byte) (string, string, int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	switch {
+	case cmd == "uname -m": // h.mu is held here
+		if h.uname == "" {
+			return "x86_64\n", "", 0
+		}
+		return h.uname + "\n", "", 0
 	case cmd == "id -u":
 		if user == "root" {
 			return "0\n", "", 0
@@ -373,7 +396,10 @@ func (h *Host) exec(user, cmd string, stdin []byte) (string, string, int) {
 
 // env is the runner's view of the fake machine.
 func (h *Host) env(stdin io.Reader, stdout, stderr io.Writer) *runner.Env {
-	env := &runner.Env{Root: h.Root, Stdin: stdin, Stdout: stdout, Stderr: stderr, ClientBin: h.client}
+	env := &runner.Env{Root: h.Root, Stdin: stdin, Stdout: stdout, Stderr: stderr, ClientBin: h.client, Arch: "amd64"}
+	if h.machine() == "aarch64" {
+		env.Arch = "arm64"
+	}
 	env.Run = func(input, name string, args ...string) (string, error) {
 		if name != "systemd-creds" {
 			return "", errors.New("not available")
@@ -387,7 +413,7 @@ func (h *Host) env(stdin io.Reader, stdout, stderr io.Writer) *runner.Env {
 	env.Exec = func(name string, args ...string) (string, error) {
 		switch name {
 		case "uname":
-			return "x86_64\n", nil
+			return h.machine() + "\n", nil
 		case "proxmox-backup-client":
 			return "client version: 3.4.1\n", nil
 		case "systemctl":

@@ -4,7 +4,8 @@ A **client** is a Linux machine whose folders you back up. The server sets it up
 
 ## What a client needs
 
-- **Debian 12 or 13, or a system based on them.** That includes Proxmox VE 8/9, OpenMediaVault 7/8 and Ubuntu 22.04/24.04. Proxmox only publishes `proxmox-backup-client` for x86-64, so clients must be x86-64.
+- **Debian 12 or 13, or a system based on them.** That includes Proxmox VE 8/9, OpenMediaVault 7/8 and Ubuntu 22.04/24.04.
+- **x86-64, or ARM64 (aarch64) on Debian 13.** Proxmox builds `proxmox-backup-client` for x86-64 on Debian 12 and 13. It builds for ARM64 only on Debian 13, so ARM64 clients need a Debian 13 based OS. See [Raspberry Pi and other ARM64 machines](#raspberry-pi-and-other-arm64-machines).
 - **SSH reachable from the server,** on your LAN or over a VPN.
 - **A sign-in for setup:** root, or a user that can use `sudo`. The password is used once and never saved.
 
@@ -43,6 +44,14 @@ Each client has its own copy of its jobs, as systemd timers, and the credentials
 ## proxmox-backup-client updates
 
 Clients get `proxmox-backup-client` updates through their own package updates, like any other package. PBC Manager never installs or upgrades packages. Each client checks its package lists once a day, without running `apt update`. When a newer version is listed, the Clients list, the client page and the Updates page say so. Update it the way you update the rest of that machine: OpenMediaVault's Update Management, Proxmox VE's Updates page, or `apt update && apt upgrade`. To be emailed about it, turn on **When a client's proxmox-backup-client has an update waiting** under **Alerts**.
+
+## Raspberry Pi and other ARM64 machines
+
+A Raspberry Pi, or any ARM64 machine, can be a client if:
+- **it runs a 64-bit OS.** `uname -m` must say `aarch64`; a 32-bit OS (`armv7l`) won't work.
+- **its OS is based on Debian 13**, such as Raspberry Pi OS based on Debian 13, or Debian 13 for ARM. A Debian 12 based OS is refused, because Proxmox doesn't build the client for it on ARM64.
+
+Setup adds Proxmox's Debian 13 `pbs-client` repository with its **`test`** component, which is where Proxmox publishes the ARM64 builds. The package is still checked against Proxmox's signing key. It's Proxmox's testing channel rather than its stable one, so it can be a version or two behind the x86-64 build. Everything else works as on x86-64.
 
 ## Folder sizes
 
