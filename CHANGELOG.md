@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 - The job form lists other disks mounted inside the chosen folders, such as a Raspberry Pi's `/boot/firmware`, a USB drive or a network share. Backups don't include them, and **Add as a folder** adds one as an archive of its own. When `/` is chosen, it adds the usual excludes (swap files, downloaded packages, temporary files) as lines you can edit ([#33](https://github.com/bradyloveland/pbcmanager/issues/33)).
+- Running backups show a progress bar with the percentage done and the time left on the Dashboard, the Backup jobs list, the client's page and the run page. The total is measured at the start of each run, using the job's excludes, at idle priority alongside the backup. Until then the previous run's size is used ([#34](https://github.com/bradyloveland/pbcmanager/issues/34)).
 
 ## [2.2.1] - 2026-10-01
 

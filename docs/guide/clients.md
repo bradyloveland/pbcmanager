@@ -71,3 +71,9 @@ They're ordinary lines you can remove. If the client runs Docker, the form says 
 ## Folder sizes
 
 Clients measure each backed-up folder in the background at idle priority, every 12 hours by default. The Dashboard adds them up as **Data protected**. Change how often under **Settings → Sizes and space**, or press **Measure again**.
+
+## Progress of running backups
+
+While a backup runs, the Dashboard, the Backup jobs list, the client's page and the run page show how far it has got, with a percentage and the time left. proxmox-backup-client reports how much it has read once a minute, and the server checks running clients every 30 seconds, so the bar moves in steps.
+
+The total comes from measuring the job's folders when the run starts. That leaves out the job's excludes and other disks, as the backup does, and runs at idle priority alongside the backup without delaying it. Until the measurement finishes, the total is the previous run's size, marked "about". A job's first backup shows the amount read so far until the measurement is done. The bar stops at 99% until the run actually ends, because files can change while it runs.

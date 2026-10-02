@@ -31,7 +31,8 @@ const (
 )
 
 // FakeClientScript stands in for proxmox-backup-client. A folder path
-// containing "fail" fails, one containing "slow" runs until interrupted.
+// containing "fail" fails, one containing "slow" runs until interrupted, and
+// one containing "progress" takes 30 seconds, reporting progress every 2.
 const FakeClientScript = `#!/bin/sh
 if [ "$1" = version ]; then echo "client version: 3.4.1"; exit 0; fi
 echo "args: $*"
@@ -39,6 +40,9 @@ echo "repo=$PBS_REPOSITORY ns=$PBS_NAMESPACE"
 [ -f "$PBS_PASSWORD_FILE" ] || { echo "Error: no password file"; exit 1; }
 case "$*" in *fail*) echo "Error: connection refused"; exit 255;; esac
 case "$*" in *slow*) trap 'echo "stopping on SIGINT"; exit 130' INT; i=0; while [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done;; esac
+case "$*" in *progress*) trap 'echo "stopping on SIGINT"; exit 130' INT
+  echo "Upload directory '/srv/progress' to '$PBS_REPOSITORY' as progress.ppxar.didx"; i=1
+  while [ $i -le 15 ]; do sleep 2; echo "processed $((i*256)) KiB in ${i}m, uploaded $((i*16)) KiB"; i=$((i+1)); done;; esac
 for a in "$@"; do case "$a" in *.pxar:*) n="${a%%.pxar:*}"
   echo "$n.mpxar: had to backup 12.5 KiB of 12.5 KiB (compressed 2.1 KiB) in 0.01 s (average 1.2 MiB/s)"
   echo "$n.ppxar: had to backup 48.75 MiB of 1.25 GiB (compressed 31.2 MiB) in 0.4 s (average 121.9 MiB/s)"
