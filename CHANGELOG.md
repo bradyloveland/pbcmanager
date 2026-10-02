@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-01
+
 ### Added
 - **ARM64 clients, such as a Raspberry Pi** with a 64-bit OS based on Debian 13. Setup sees the client's CPU type, sends the matching `pbcm-runner`, and installs Proxmox's own ARM64 `proxmox-backup-client` from the `test` component of its Debian 13 repository. An ARM64 machine on a Debian 12 based OS is refused with a clear message, because Proxmox doesn't build the client for it. Releases now include `pbcm-runner-arm64`, and each client gets signed runner updates for its own CPU type. ([#27](https://github.com/bradyloveland/pbcmanager/issues/27))
 
@@ -141,7 +143,8 @@ First public release.
 ### Added
 - Initial release: destinations, backup jobs with schedules, folder browser, exclusions, speed limits, encryption keys, live logs, run cancellation, snapshot listing, email failure alerts, HTTPS with a self-signed certificate, systemd installer.
 
-[Unreleased]: https://github.com/bradyloveland/pbcmanager/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/bradyloveland/pbcmanager/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/bradyloveland/pbcmanager/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/bradyloveland/pbcmanager/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/bradyloveland/pbcmanager/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/bradyloveland/pbcmanager/releases/tag/v2.0.0
