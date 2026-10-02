@@ -441,7 +441,13 @@ func (m *Manager) refresh(ctx context.Context, c *store.Client) error {
 	if info.ClientVersion == "" {
 		c.Status, c.StatusDetail = store.ClientError, "proxmox-backup-client isn't installed on the client. Use Repair to install it."
 	}
-	return m.store.SaveClient(c)
+	if err := m.store.SaveClient(c); err != nil {
+		return err
+	}
+	if c.Status == store.ClientReady {
+		m.syncPackage(ctx, c, true) // Check now and Repair read it straight away
+	}
+	return nil
 }
 
 // Check contacts a client and updates its details.

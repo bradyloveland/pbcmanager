@@ -511,3 +511,31 @@ func TestMultipartMessage(t *testing.T) {
 		t.Error("non-ASCII text is quoted-printable encoded")
 	}
 }
+
+func TestClientUpdateWaiting(t *testing.T) {
+	e := newEnv(t)
+	on := Defaults()
+	on.Enabled, on.Host, on.From, on.To, on.OnClientUpdate = true, "smtp.example.net", "nas@example.net", "me@example.net", true
+	on.OnMissed, on.OnUnreachable = false, false
+	e.n.Settings = func() Settings { return on }
+	c := client()
+	c.Status = store.ClientReady
+	e.st.CreateClient(c)
+	p := bundle.PackageInfo{Package: "proxmox-backup-client", Installed: "3.4.6-1", Candidate: "3.4.7-1", FromApt: true, Newer: true,
+		AvailableSince: e.clock.Add(-10 * 24 * time.Hour).Unix()}
+	e.st.PutSize(bundle.PackageCache, c.ID, p)
+	e.n.Check()
+	if len(e.messages()) != 0 {
+		t.Fatal("10 days is under the default 14")
+	}
+	e.clock = e.clock.Add(5 * 24 * time.Hour)
+	e.n.Check()
+	e.n.Check()
+	msgs := e.messages()
+	if len(msgs) != 1 || !strings.Contains(msgs[0], "Update waiting: proxmox-backup-client 3.4.7-1 on NAS") || !strings.Contains(msgs[0], "doesn't install packages itself") {
+		t.Fatalf("waiting update: %v", msgs)
+	}
+	if strings.Contains(msgs[0], "new major version") {
+		t.Fatal("3.4.7 isn't a major version")
+	}
+}

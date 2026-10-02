@@ -605,3 +605,40 @@ func TestRunnerIsUpdatedFromASignedRelease(t *testing.T) {
 		t.Fatalf("runner version: %q", c.RunnerVersion)
 	}
 }
+
+func TestPackageUpdatesAreNoticed(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	c, v := h.add(t, Login{User: "root", Password: rootPW})
+	if !v.OK {
+		t.Fatalf("setup: %+v", v)
+	}
+	p := h.m.Package(c.ID)
+	if p == nil || p.Installed != "3.4.1-1" || p.UpdateAvailable() {
+		t.Fatalf("after setup: %+v", p)
+	}
+	// Proxmox publishes 3.4.2; the next check (it's due daily) notices.
+	h.host.OfferPackage("3.4.2-1")
+	h.m.SyncClient(ctx, c.ID)
+	if p := h.m.Package(c.ID); p.UpdateAvailable() {
+		t.Fatal("not checked again until a day has passed")
+	}
+	if _, err := h.m.Check(ctx, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	p = h.m.Package(c.ID)
+	if !p.UpdateAvailable() || p.Candidate != "3.4.2-1" || p.AvailableSince == 0 {
+		t.Fatalf("after Check now: %+v", p)
+	}
+	since := p.AvailableSince
+	time.Sleep(1100 * time.Millisecond)
+	h.m.Check(ctx, c.ID)
+	if p := h.m.Package(c.ID); p.AvailableSince != since {
+		t.Fatal("AvailableSince stays at when the update first appeared")
+	}
+	for _, e := range h.host.Execs() {
+		if strings.Contains(e.Cmd, "apt-get") || strings.Contains(e.Cmd, "upgrade") {
+			t.Fatalf("checking for updates must not install anything: %q", e.Cmd)
+		}
+	}
+}

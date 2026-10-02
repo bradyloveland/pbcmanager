@@ -69,6 +69,7 @@ func (s *Server) clientViewFull(c *store.Client) map[string]any {
 	v := clientView(c)
 	v["settings_pending"] = s.clients.Pending(c)
 	v["apply_error"] = c.ApplyError
+	v["package"] = packageView(s.clients.Package(c.ID))
 	return v
 }
 
