@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-01
+
 ### Added
 - **Waiting proxmox-backup-client updates are shown** on the Clients list, the client page, the Dashboard and a new section of the Updates page. Each client checks its own package lists once a day, and when you press Check now or Repair. Nothing is installed: PBC Manager only reports it, and says when it's a new major version that usually comes with an OS upgrade. An optional email (off by default) reports an update that's been waiting for a number of days you choose. ([#12](https://github.com/bradyloveland/pbcmanager/issues/12))
 - **HTML alert emails.** Each email has a coloured status bar (failed, succeeded, didn't run, can't reach, nearly full), a headline, a details table with the backup figures, the end of the log for failures, and a button to the run when the server's web address is set. A plain-text version goes with every email for mail apps that can't show HTML. Nothing loads from the internet: no web fonts, images or tracking. "Send plain-text emails only" under Alerts goes back to text only. The test email shows the new layout. ([#18](https://github.com/bradyloveland/pbcmanager/issues/18))
@@ -136,7 +138,8 @@ First public release.
 ### Added
 - Initial release: destinations, backup jobs with schedules, folder browser, exclusions, speed limits, encryption keys, live logs, run cancellation, snapshot listing, email failure alerts, HTTPS with a self-signed certificate, systemd installer.
 
-[Unreleased]: https://github.com/bradyloveland/pbcmanager/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/bradyloveland/pbcmanager/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/bradyloveland/pbcmanager/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/bradyloveland/pbcmanager/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/bradyloveland/pbcmanager/releases/tag/v2.0.0
 [1.2.0]: https://github.com/bradyloveland/pbcmanager/releases/tag/v1.2.0
