@@ -20,6 +20,7 @@ A self-hosted web UI for file-level backups with `proxmox-backup-client`. One ce
   - the health of every job, with its last 20 runs
   - how much data is protected
   - how full each datastore is
+  - success rates, runs per day, and the largest and longest-running backups
 - **Backup jobs:**
   - several folders per job, chosen with a folder browser on the client
   - exclusions, change detection mode, speed limit, encryption key file

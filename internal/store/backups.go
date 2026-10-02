@@ -375,3 +375,28 @@ func (s *Store) PruneRuns(keep int) ([]*Run, error) {
 	}
 	return old, nil
 }
+
+// RunsSince returns every run that started at or after since, newest first.
+// Run history is pruned (5000 runs by default), so this stays small.
+func (s *Store) RunsSince(since int64) ([]*Run, error) {
+	rows, err := s.db.Query(`SELECT `+runCols+` FROM runs WHERE started >= ? ORDER BY started DESC`, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*Run{}
+	for rows.Next() {
+		r, err := scanRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// RunHistory says how many runs the server keeps and when the oldest started.
+func (s *Store) RunHistory() (count int, oldest int64, err error) {
+	err = s.db.QueryRow(`SELECT COUNT(*), COALESCE(MIN(started), 0) FROM runs`).Scan(&count, &oldest)
+	return count, oldest, err
+}
