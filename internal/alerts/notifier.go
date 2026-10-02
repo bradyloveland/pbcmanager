@@ -172,7 +172,7 @@ func writeStats(b *strings.Builder, st *bundle.Stats) {
 		fmt.Fprintf(b, "Files:        %d, of which %d new or changed\n", st.Files, st.Changed)
 	}
 	if st.Has("duration") && st.Seconds > 0 {
-		fmt.Fprintf(b, "Upload time:  %s\n", (time.Duration(st.Seconds*float64(time.Second))).Round(time.Second/10))
+		fmt.Fprintf(b, "Upload time:  %s\n", (time.Duration(st.Seconds * float64(time.Second))).Round(time.Second/10))
 	}
 	if len(st.Archives) > 1 {
 		for _, a := range st.Archives {
