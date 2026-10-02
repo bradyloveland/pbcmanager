@@ -1253,6 +1253,7 @@ async function viewAlerts(token) {
           ${check("on_unreachable", "When a client can't be reached", "And again when it's back.")}
           ${check("on_full", "When a destination is nearly full", "Before backups to it start failing. And again once there's room.")}
           ${check("on_success", "When a backup succeeds", "Usually more email than you want; failures and missed backups are the ones to watch.")}
+          ${check("plain_text", "Send plain-text emails only", "Alerts are laid out with a coloured status bar and a details table, with a plain-text version for mail apps that can't show it. Turn this on to send only the plain text.")}
         </div>
         <div class="formgrid top">
           <div class="field"><label for="a-grace"><span>Call a backup missed after</span></label><div class="unit"><input type="number" id="a-grace" name="missed_grace_minutes" value="${esc(a.missed_grace_minutes)}" min="10" max="1440"><span class="muted small">minutes</span></div>
@@ -1291,7 +1292,7 @@ async function viewAlerts(token) {
       </tbody></table></div>` : `<p class="muted">No alerts yet.</p>`}</div>`);
   const f = $("#aform"), out = $("#a-result");
   const read = () => ({enabled: f.enabled.checked, on_failure: f.on_failure.checked, on_success: f.on_success.checked, on_missed: f.on_missed.checked,
-    on_unreachable: f.on_unreachable.checked, on_full: f.on_full.checked, full_percent: Number(f.full_percent.value) || 0, missed_grace_minutes: Number(f.missed_grace_minutes.value) || 0, unreachable_minutes: Number(f.unreachable_minutes.value) || 0,
+    on_unreachable: f.on_unreachable.checked, on_full: f.on_full.checked, plain_text: f.plain_text.checked, full_percent: Number(f.full_percent.value) || 0, missed_grace_minutes: Number(f.missed_grace_minutes.value) || 0, unreachable_minutes: Number(f.unreachable_minutes.value) || 0,
     to: f.to.value, from: f.from.value, host: f.host.value, port: Number(f.port.value) || 0, security: f.security.value, username: f.username.value, password: f.password.value});
   f.security.addEventListener("change", () => { if ([25, 465, 587].includes(+f.port.value)) f.port.value = {starttls: 587, ssl: 465, none: 25}[f.security.value]; });
   f.addEventListener("submit", async e => {

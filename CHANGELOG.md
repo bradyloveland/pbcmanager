@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **HTML alert emails.** Each email has a coloured status bar (failed, succeeded, didn't run, can't reach, nearly full), a headline, a details table with the backup figures, the end of the log for failures, and a button to the run when the server's web address is set. A plain-text version goes with every email for mail apps that can't show HTML. Nothing loads from the internet: no web fonts, images or tracking. "Send plain-text emails only" under Alerts goes back to text only. The test email shows the new layout. ([#18](https://github.com/bradyloveland/pbcmanager/issues/18))
 - **Backup figures** for every run: data read, new data uploaded (and compressed), data reused from the last backup, files (total and new or changed), and the upload time. They're read from `proxmox-backup-client`'s own summary, so nothing extra runs on the client. They appear in alert emails, with the destination's free space, on the run page (per folder when a job has several), and in the job page's run list. Runs from before 2.1.0 don't have them. ([#17](https://github.com/bradyloveland/pbcmanager/issues/17))
 - **Dashboard metric cards:**
   - **Backup jobs:** how many, and how many are enabled, disabled and by hand only.
