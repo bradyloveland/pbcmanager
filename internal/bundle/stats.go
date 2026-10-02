@@ -139,3 +139,34 @@ func parseSize(num, unit string) int64 {
 	}
 	return int64(v*mult + 0.5)
 }
+
+var (
+	uploadDirRE   = regexp.MustCompile(`Upload directory '(.*)' to '.*' as (\S+?)\.[mp]?pxar\.didx`)
+	processedRE   = regexp.MustCompile(`processed ` + sizeRE + ` in [^,]+, uploaded ` + sizeRE)
+	payloadDoneRE = regexp.MustCompile(`^(\S+?)\.p?pxar: had to backup ` + sizeRE + ` of ` + sizeRE)
+)
+
+// Progress line kinds, from ParseProgressLine.
+const (
+	LineFolder    = "folder"    // a folder's upload started
+	LineProcessed = "processed" // the current folder's bytes read so far
+	LineFinished  = "finished"  // a folder finished; bytes is its size
+)
+
+// ParseProgressLine reads one line of proxmox-backup-client output for
+// progress. kind is "" for any other line. Only the data stream counts: with
+// metadata change detection a folder's metadata part (.mpxar) is left out,
+// as the client's own progress lines leave it out.
+func ParseProgressLine(line string) (kind, archive string, bytes int64) {
+	line = strings.TrimRight(line, " \t\r")
+	if m := processedRE.FindStringSubmatch(line); m != nil {
+		return LineProcessed, "", parseSize(m[1], m[2])
+	}
+	if m := uploadDirRE.FindStringSubmatch(line); m != nil {
+		return LineFolder, m[2], 0
+	}
+	if m := payloadDoneRE.FindStringSubmatch(line); m != nil {
+		return LineFinished, m[1], parseSize(m[4], m[5])
+	}
+	return "", "", 0
+}

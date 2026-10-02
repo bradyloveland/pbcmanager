@@ -250,15 +250,21 @@ type Run struct {
 }
 
 const runCols = `client_id, id, job_id, group_id, job_name, destination_id, destination_name, trigger, status, started,
-	ended, exit_code, summary, log_size, updated, collected_at, log_saved, stats`
+	ended, exit_code, summary, log_size, updated, collected_at, log_saved, stats, progress`
 
 func scanRun(row interface{ Scan(...any) error }) (*Run, error) {
 	var r Run
 	var code sql.NullInt64
 	var saved int
-	var stats string
+	var stats, progress string
 	err := row.Scan(&r.ClientID, &r.ID, &r.JobID, &r.Group, &r.JobName, &r.DestinationID, &r.DestinationName, &r.Trigger,
-		&r.Status, &r.Started, &r.Ended, &code, &r.Summary, &r.LogSize, &r.Updated, &r.CollectedAt, &saved, &stats)
+		&r.Status, &r.Started, &r.Ended, &code, &r.Summary, &r.LogSize, &r.Updated, &r.CollectedAt, &saved, &stats, &progress)
+	if progress != "" && r.Status == bundle.Running {
+		var p bundle.Progress
+		if json.Unmarshal([]byte(progress), &p) == nil {
+			r.Progress = &p
+		}
+	}
 	if stats != "" {
 		var s bundle.Stats
 		if json.Unmarshal([]byte(stats), &s) == nil {
@@ -293,12 +299,17 @@ func (s *Store) UpsertRun(clientID string, r bundle.Run) (string, error) {
 		raw, _ := json.Marshal(r.Stats)
 		stats = string(raw)
 	}
-	_, err = s.db.Exec(`INSERT INTO runs (`+runCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)
+	progress := ""
+	if r.Progress != nil && r.Status == bundle.Running {
+		raw, _ := json.Marshal(r.Progress)
+		progress = string(raw)
+	}
+	_, err = s.db.Exec(`INSERT INTO runs (`+runCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)
 		ON CONFLICT(client_id, id) DO UPDATE SET status=excluded.status, ended=excluded.ended, exit_code=excluded.exit_code,
 		summary=excluded.summary, log_size=excluded.log_size, updated=excluded.updated, collected_at=excluded.collected_at,
-		stats=excluded.stats`,
+		stats=excluded.stats, progress=excluded.progress`,
 		clientID, r.ID, r.JobID, r.Group, r.JobName, r.DestinationID, r.DestinationName, r.Trigger, r.Status, r.Started,
-		r.Ended, code, r.Summary, r.LogSize, r.Updated, s.Now().Unix(), stats)
+		r.Ended, code, r.Summary, r.LogSize, r.Updated, s.Now().Unix(), stats, progress)
 	return prev, err
 }
 

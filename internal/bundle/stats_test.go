@@ -77,3 +77,24 @@ func TestParseSize(t *testing.T) {
 		}
 	}
 }
+
+func TestParseProgressLine(t *testing.T) {
+	for line, want := range map[string]struct {
+		kind, archive string
+		n             int64
+	}{
+		"Upload directory '/srv/my media' to 'a@pbs@host:store' as media.pxar.didx": {LineFolder, "media", 0},
+		"Upload directory '/srv/m' to 'repo' as media.mpxar.didx":                   {LineFolder, "media", 0},
+		"processed 1.5 GiB in 2m 3s, uploaded 345 MiB":                              {LineProcessed, "", 3 << 29},
+		"processed 512 B in 1m, uploaded 0 B\r":                                     {LineProcessed, "", 512},
+		"media.ppxar: had to backup 1.5 MiB of 6 MiB (compressed 1 MiB) in 0.02 s":  {LineFinished, "media", 6 << 20},
+		"root.pxar: had to backup 0 B of 2 GiB (compressed 0 B) in 9 s":             {LineFinished, "root", 2 << 30},
+		"media.mpxar: had to backup 1 MiB of 2 MiB (compressed 1 MiB) in 1 s":       {"", "", 0},
+		"Starting backup: host/nas/2026-10-01T00:00:00Z":                            {"", "", 0},
+	} {
+		k, a, n := ParseProgressLine(line)
+		if k != want.kind || a != want.archive || n != want.n {
+			t.Errorf("%q: got %q %q %d", line, k, a, n)
+		}
+	}
+}

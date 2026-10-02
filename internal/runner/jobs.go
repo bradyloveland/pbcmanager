@@ -345,6 +345,8 @@ func RunJob(env *Env, jobID string, cancel <-chan struct{}) error {
 	}
 	group := newRunID(env.now())
 	failed := false
+	total := env.measureTotal(job)
+	defer close(total.stop)
 	for _, destID := range job.Destinations {
 		select {
 		case <-cancel:
@@ -360,7 +362,7 @@ func RunJob(env *Env, jobID string, cancel <-chan struct{}) error {
 		if err := env.saveRun(r); err != nil {
 			return err
 		}
-		env.backupOne(job, d, r, cancel)
+		env.backupOne(job, d, r, total, cancel)
 		if r.Status != bundle.Success {
 			failed = true
 		}
@@ -397,7 +399,7 @@ func BackupCommand(client string, j *bundle.Job) []string {
 	return cmd
 }
 
-func (e *Env) backupOne(job *bundle.Job, d bundle.Destination, r *bundle.Run, cancel <-chan struct{}) {
+func (e *Env) backupOne(job *bundle.Job, d bundle.Destination, r *bundle.Run, total *jobTotal, cancel <-chan struct{}) {
 	logf, err := os.OpenFile(filepath.Join(e.runDir(r.ID), "log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		e.finish(r, bundle.Failed, nil, "Couldn't create the log file: "+err.Error())
@@ -467,7 +469,9 @@ func (e *Env) backupOne(job *bundle.Job, d bundle.Destination, r *bundle.Run, ca
 	}
 	note("Command: %s", strings.Join(args, " "))
 	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Env, cmd.Stdout, cmd.Stderr = env, logf, logf
+	track := newTracker(e, r, job, total)
+	out := io.MultiWriter(logf, track)
+	cmd.Env, cmd.Stdout, cmd.Stderr = env, out, out
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		fail("Couldn't start proxmox-backup-client: " + err.Error())
@@ -490,6 +494,7 @@ func (e *Env) backupOne(job *bundle.Job, d bundle.Destination, r *bundle.Run, ca
 			waitErr = <-done
 		}
 	}
+	track.close()
 	code := 0
 	if cmd.ProcessState != nil {
 		code = cmd.ProcessState.ExitCode()

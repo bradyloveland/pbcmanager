@@ -288,6 +288,25 @@ type Run struct {
 	LogSize         int64  `json:"log_size"`
 	// Stats are the backup's figures, when the client printed them.
 	Stats *Stats `json:"stats,omitempty"`
+	// Progress is how far a running backup has got. It's cleared when the
+	// run ends.
+	Progress *Progress `json:"progress,omitempty"`
+}
+
+// Progress is how far a running backup has got, from the progress lines
+// proxmox-backup-client prints once a minute per folder.
+type Progress struct {
+	Done int64 `json:"done"` // bytes read so far, all folders
+	// Total is the expected size: measured at the start of the run, or until
+	// then the previous successful run's size. 0 when there's neither.
+	Total     int64   `json:"total"`
+	TotalFrom string  `json:"total_from"` // "measured", "previous" or ""
+	Measuring bool    `json:"measuring"`  // the total is still being measured
+	Archive   string  `json:"archive"`    // the folder being backed up now
+	Folder    int     `json:"folder"`     // its number, from 1
+	Folders   int     `json:"folders"`
+	Rate      float64 `json:"rate"` // bytes per second, recently
+	At        int64   `json:"at"`   // when the client last reported progress
 }
 
 // FolderSize is a folder's measured size on a client.

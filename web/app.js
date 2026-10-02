@@ -498,9 +498,37 @@ function tape(recent, clientId) {
   }
   return `<div class="tape">${html}</div>`;
 }
+// progressPct is a running backup's percentage done, or null when there's
+// no total to compare with. It stays at 99% until the run actually ends.
+function progressPct(p) {
+  if (!p || !p.total) return null;
+  return Math.max(0, Math.min(99, Math.floor(p.done * 100 / p.total)));
+}
+// progressHtml shows a running backup's progress bar and figures. long adds
+// the folder being backed up and where the total comes from.
+function progressHtml(r, long) {
+  const p = r.progress;
+  if (!p) return "";
+  const pct = progressPct(p);
+  const bits = [];
+  if (pct !== null) {
+    bits.push(`${bytes(p.done)} of ${p.total_from === "previous" ? "about " : ""}${bytes(p.total)}`);
+    if (p.rate > 0 && p.total > p.done) {
+      const left = (p.total - p.done) / p.rate;
+      bits.push(left < 60 ? "under a minute left" : `about ${dur(1, 1 + left)} left`);
+    }
+  } else if (p.done) bits.push(`${bytes(p.done)} so far`);
+  else bits.push(p.measuring ? "Starting, measuring the folders" : "Starting");
+  if (long && p.folders > 1 && p.folder) bits.push(`folder ${p.folder} of ${p.folders}${p.archive ? ` (${p.archive})` : ""}`);
+  let note = "";
+  if (long && pct !== null) note = p.total_from === "previous" ? "The total is the last run's size until the folders have been measured." : "The total was measured when the run started.";
+  else if (long && p.done && pct === null) note = "This is the job's first backup to this destination, so there's nothing to compare with until the folders have been measured.";
+  return `<div class="progress-line"><progress max="100" ${pct !== null ? `value="${pct}"` : ""} aria-label="Backup progress">${pct !== null ? pct + "%" : ""}</progress>${pct !== null ? `<b>${pct}%</b>` : ""}</div>
+    <span class="sub">${esc(bits.join(" · "))}</span>${note ? `<span class="sub">${esc(note)}</span>` : ""}`;
+}
 function jobState(j) {
   const cur = (j.recent || []).find(r => r.status === "running");
-  if (cur) return `<div class="state running"><b>Running now</b><span class="sub">to ${esc(cur.destination_name)} for ${dur(cur.started)}</span></div>`;
+  if (cur) return `<div class="state running"><b>Running now</b>${progressHtml(cur)}<span class="sub">to ${esc(cur.destination_name)} for ${dur(cur.started)}</span></div>`;
   const last = lastFinished(j);
   if (!last) return `<div class="state"><b>Never run</b><span class="sub">No history yet</span></div>`;
   return `<div class="state ${esc(last.status)}"><b>${STATUS_WORD[last.status]}</b><span class="sub">${esc(ago(last.ended))}</span></div>`;
@@ -590,7 +618,7 @@ function runsTable(items, showJob) {
       <td class="small">${esc(r.destination_name)}</td>
       <td class="small nowrap">${esc(fmtTime(r.started))}</td>
       <td class="small nowrap">${esc(dur(r.started, r.ended || null))}</td>
-      <td><div class="summary">${esc(r.summary || (r.status === "running" ? "In progress" : ""))}</div>${statsLine(r.stats) ? `<div class="sub">${esc(statsLine(r.stats))}</div>` : ""}</td></tr>`).join("")}
+      <td>${r.status === "running" && r.progress ? `<div class="state">${progressHtml(r)}</div>` : `<div class="summary">${esc(r.summary || (r.status === "running" ? "In progress" : ""))}</div>`}${statsLine(r.stats) ? `<div class="sub">${esc(statsLine(r.stats))}</div>` : ""}</td></tr>`).join("")}
   </tbody></table>`;
 }
 
@@ -1010,7 +1038,8 @@ async function viewRun(clientId, runId, token) {
     $("#run-sub").textContent = `${client_name} to ${r.destination_name}. ${r.trigger === "manual" ? "Started by hand" : "Scheduled"}, began ${fmtTime(r.started)}, ${r.status === "running" ? "running for " : "took "}${dur(r.started, r.ended || null)}.`;
     $("#run-actions").innerHTML = r.status === "running" ? `<button class="btn danger" data-cancel="${esc(r.job_id)}">Cancel run</button>` : `<a class="btn" href="#/jobs/${esc(r.job_id)}">View job</a>`;
     bindRunButtons(draw);
-    $("#run-summary").innerHTML = (r.status === "failed" && r.summary ? `<div class="banner bad"><b>Why it failed:</b> ${esc(r.summary)}</div>` : "") + statsPanel(r.stats);
+    $("#run-summary").innerHTML = (r.status === "running" && r.progress ? `<div class="panel mb-14"><h2>Progress</h2><div class="state">${progressHtml(r, true)}</div></div>` : "") +
+      (r.status === "failed" && r.summary ? `<div class="banner bad"><b>Why it failed:</b> ${esc(r.summary)}</div>` : "") + statsPanel(r.stats);
     try {
       const d = await api("GET", `/runs/${clientId}/${runId}/log?offset=${offset}`);
       if (token !== routeToken) return;
@@ -1220,7 +1249,7 @@ async function viewClient(id, token) {
     <div class="cols"><div class="stack">
       <div class="panel" id="c-task" ${task && !task.done ? "" : "hidden"}><h2>Setup</h2></div>
       <div class="panel"><div class="pagehead m-0"><h2 class="m-0">Backup jobs</h2><a class="btn small" href="#/jobs/new/${esc(id)}">Add a backup job</a></div>
-        ${jobs.length ? `<ul class="steps mt-12">${jobs.map(j => `<li><a class="jobname" href="#/jobs/${esc(j.id)}">${esc(j.name)}</a> <span class="sub">${esc(schedText(j.schedule))}${j.enabled ? "" : ", disabled"}</span></li>`).join("")}</ul>` : `<p class="muted mt-12">No jobs for this client yet.</p>`}</div>
+        ${jobs.length ? `<ul class="steps mt-12">${jobs.map(j => `<li><a class="jobname" href="#/jobs/${esc(j.id)}">${esc(j.name)}</a> <span class="sub">${esc(schedText(j.schedule))}${j.enabled ? "" : ", disabled"}</span>${(() => { const cur = (j.recent || []).find(r => r.status === "running"); return cur ? `<div class="state running"><b>Running now</b>${progressHtml(cur)}</div>` : ""; })()}</li>`).join("")}</ul>` : `<p class="muted mt-12">No jobs for this client yet.</p>`}</div>
       <div class="panel"><h2>Repair</h2><p class="hint m-0 mb-14">Runs setup again as root: reinstalls pbcm-runner, the pbcm account and its sudo rule, and the backup client if it's missing. Use it after reinstalling the client, if its host key changed, or if something was removed by hand.</p>
         <button class="btn" id="c-repair">Repair ${esc(c.name)}</button><div id="c-repair-flow"></div></div>
       <div class="panel"><h2>Remove</h2><p class="hint m-0 mb-14">Stops managing this client.</p>
