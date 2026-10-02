@@ -416,7 +416,7 @@ func TestApplyRunCollectAndLog(t *testing.T) {
 	}
 }
 
-func TestPausedJobCantBeStarted(t *testing.T) {
+func TestDisabledJobCantBeStarted(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	c, j := h.jobSetup(t, "/srv/media")
@@ -426,8 +426,8 @@ func TestPausedJobCantBeStarted(t *testing.T) {
 		t.Fatal(err)
 	}
 	var in *InputError
-	if err := h.m.StartJob(ctx, j.ID); !errors.As(err, &in) || !strings.Contains(in.Message, "paused") {
-		t.Fatalf("starting a paused job: %v", err)
+	if err := h.m.StartJob(ctx, j.ID); !errors.As(err, &in) || !strings.Contains(in.Message, "disabled") {
+		t.Fatalf("starting a disabled job: %v", err)
 	}
 	if h.host.Running(j.ID) {
 		t.Fatal("nothing should have started")

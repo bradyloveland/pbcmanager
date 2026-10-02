@@ -194,8 +194,22 @@ tr.clickable:hover td{background:var(--surface-2)}
 .ledger-head,.jobrow{display:grid;grid-template-columns:minmax(170px,1.3fr) minmax(200px,1.3fr) minmax(140px,1fr) minmax(130px,.9fr) 104px;gap:18px;align-items:center;padding:14px 20px}
 .ledger-head{font-size:12.5px;color:var(--muted);border-bottom:1px solid var(--line);padding-top:11px;padding-bottom:11px;background:var(--surface-2)}
 .jobrow + .jobrow{border-top:1px solid var(--line)}
-/* A paused job: fade what it would do, not the row's controls. */
-.jobrow.paused .tape,.jobrow.paused .state,.jobrow.paused > .small{opacity:.62}
+/* A disabled job: fade what it would do, not the row's controls. */
+.jobrow.disabled .tape,.jobrow.disabled .state,.jobrow.disabled > .small{opacity:.62}
+
+/* On/off switch: a real checkbox (role="switch") with a drawn track. */
+.switch{display:inline-flex;align-items:center;gap:10px;cursor:pointer;font-weight:600;font-size:14.5px;position:relative;user-select:none}
+.switch input{position:absolute;opacity:0;width:1px;height:1px;margin:0}
+.switch .track{position:relative;flex:none;width:42px;height:24px;border-radius:12px;background:var(--idle);transition:background .15s}
+.switch .track::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.35);transition:transform .15s}
+.switch input:checked + .track{background:var(--ok)}
+.switch input:checked + .track::after{transform:translateX(18px)}
+.switch input:focus-visible + .track{outline:3px solid var(--focus);outline-offset:2px}
+.switch input:disabled + .track{opacity:.55}
+.switch input:not(:checked) ~ .switch-label{color:var(--muted)}
+.titleline{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.titleline h1{margin-bottom:0}
+@media (prefers-reduced-motion:reduce){.switch .track,.switch .track::after{transition:none}}
 .tape{display:flex;gap:3px;align-items:flex-end;height:30px}
 .tape a,.tape span{display:block;width:9px;height:24px;border-radius:2px;background:var(--idle);opacity:.45}
 .tape .success{background:var(--ok);opacity:1}

@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -54,8 +55,21 @@ func TestImportFrom1xAndExport(t *testing.T) {
 		return c.get("/api/clients/" + clientID).data["client"].(map[string]any)["settings_pending"] == false
 	})
 
-	// The imported job is paused, so it can't be run until it's turned on.
-	expect(t, c.post("/api/jobs/"+j["id"].(string)+"/run", nil), 400, "This job is paused")
+	// The imported job is disabled, so it can't be run until it's enabled.
+	jobID := j["id"].(string)
+	expect(t, c.post("/api/jobs/"+jobID+"/run", nil), 400, "This job is disabled")
+	expect(t, c.post("/api/jobs/"+jobID+"/enabled", map[string]any{}), 400, "Say whether")
+	expect(t, c.post("/api/jobs/nope/enabled", map[string]any{"enabled": true}), 404, "")
+	expect(t, c.post("/api/jobs/"+jobID+"/enabled", map[string]any{"enabled": true}), 200, `"enabled":true`)
+	waitFor(t, "the schedule on the client", 10*time.Second, func() bool {
+		_, err := os.Stat(host.Path("/etc/systemd/system/pbcm-job-" + jobID + ".timer"))
+		return err == nil
+	})
+	expect(t, c.post("/api/jobs/"+jobID+"/enabled", map[string]any{"enabled": false}), 200, `"enabled":false`)
+	waitFor(t, "the schedule to be removed", 10*time.Second, func() bool {
+		_, err := os.Stat(host.Path("/etc/systemd/system/pbcm-job-" + jobID + ".timer"))
+		return os.IsNotExist(err)
+	})
 
 	r = c.get("/api/settings/export")
 	expect(t, r, 200, `"format":"pbcm-settings"`)

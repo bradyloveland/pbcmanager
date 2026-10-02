@@ -398,14 +398,14 @@ function jobState(j) {
   return `<div class="state ${esc(last.status)}"><b>${STATUS_WORD[last.status]}</b><span class="sub">${esc(ago(last.ended))}</span></div>`;
 }
 function nextText(j) {
-  if (!j.enabled) return `<b>Paused</b><div class="sub">Won't run on schedule</div>`;
+  if (!j.enabled) return `<b>Disabled</b><div class="sub">Enable the job to run it</div>`;
   if (!j.next_run) return `<b>By hand</b><div class="sub">Start it with Run now</div>`;
   return `<b>${esc(fmtTime(j.next_run))}</b><div class="sub">${esc(schedText(j.schedule))}</div>`;
 }
 function jobLedger(jobs, sizes) {
   return `<div class="ledger">
     <div class="ledger-head"><div>Job</div><div>Last 20 runs, oldest to newest</div><div>Last result</div><div>Next run</div><div></div></div>
-    ${jobs.map(j => `<div class="jobrow ${j.enabled ? "" : "paused"}">
+    ${jobs.map(j => `<div class="jobrow ${j.enabled ? "" : "disabled"}">
       <div><a class="jobname" href="#/jobs/${esc(j.id)}">${esc(j.name)}</a>
         <div class="sub">${esc(j.client_name)} to ${esc(j.destination_names.join(", ") || "no destination")}</div>
         ${sizes && jobSize(sizes.jobs[j.id]) ? `<div class="sub">${esc(jobSize(sizes.jobs[j.id]))}</div>` : ""}</div>
@@ -416,11 +416,34 @@ function jobLedger(jobs, sizes) {
     </div>`).join("")}</div>`;
 }
 function runButton(j) {
-  // A running backup can always be cancelled; a paused job can't be started.
+  // A running backup can always be cancelled; a disabled job can't be started.
   if (isRunning(j)) return `<button class="btn small" data-cancel="${esc(j.id)}">Cancel</button>`;
-  if (!j.enabled) return `<button class="btn small" disabled title="This job is paused. Edit it and turn on Run on schedule to run it." aria-label="Run now (unavailable: this job is paused)">Run now</button>`;
+  if (!j.enabled) return `<button class="btn small" disabled title="This job is disabled. Enable it to run it." aria-label="Run now (unavailable: this job is disabled)">Run now</button>`;
   return `<button class="btn small" data-run="${esc(j.id)}">Run now</button>`;
 }
+// switchHtml is an on/off switch: a checkbox with role="switch", drawn by CSS.
+// With a job ID it turns that job on or off straight away (see bindSwitches).
+function switchHtml(name, on, jobId) {
+  return `<label class="switch"><input type="checkbox" role="switch" name="${esc(name)}" ${on ? "checked" : ""}${jobId ? ` data-enable="${esc(jobId)}"` : ""}>
+    <span class="track" aria-hidden="true"></span><span class="switch-label">${on ? "Enabled" : "Disabled"}</span></label>`;
+}
+const jobSwitch = j => switchHtml("job-enabled", j.enabled, j.id);
+function bindSwitches(refresh) {
+  $$(".switch input").forEach(i => i.addEventListener("change", () => { $(".switch-label", i.parentElement).textContent = i.checked ? "Enabled" : "Disabled"; }));
+  $$("[data-enable]").forEach(i => i.addEventListener("change", async () => {
+    i.disabled = true;
+    try {
+      await api("POST", `/jobs/${i.dataset.enable}/enabled`, {enabled: i.checked});
+      toast(i.checked ? "Job enabled. Its schedule is sent to the client." : "Job disabled. It won't run until you enable it again.");
+      refresh && refresh();
+    } catch (ex) {
+      toast(ex.message, "bad");
+      i.checked = !i.checked;
+      $(".switch-label", i.parentElement).textContent = i.checked ? "Enabled" : "Disabled";
+    } finally { i.disabled = false; }
+  }));
+}
+
 function bindRunButtons(refresh) {
   $$("[data-run]").forEach(b => b.addEventListener("click", async () => {
     b.disabled = true;
@@ -467,7 +490,8 @@ async function viewJobDetail(id, token) {
   const [{job: j}] = await Promise.all([api("GET", `/jobs/${id}`)]);
   if (token !== routeToken) return;
   render(`<a class="back" href="#/jobs">‹ Backup jobs</a>
-    <div class="pagehead"><div><h1>${esc(j.name)}</h1><p class="lede">${esc(j.client_name)} · ${esc(schedText(j.schedule))}${j.enabled ? "" : ", currently paused"}</p></div>
+    <div class="pagehead"><div><div class="titleline"><h1>${esc(j.name)}</h1><span id="j-switch">${jobSwitch(j)}</span></div>
+      <p class="lede"><a href="#/clients/${esc(j.client_id)}">${esc(j.client_name)}</a> · ${esc(schedText(j.schedule))}</p></div>
       <div class="btnrow"><a class="btn" href="#/jobs/${esc(id)}/edit">Edit job</a><span id="j-run">${runButton(j).replace("btn small", "btn primary")}</span></div></div>
     <div class="cols"><div class="stack">
       <div class="panel"><h2>Recent runs</h2><div id="runs" class="tablewrap"><div class="loading">Loading…</div></div></div>
@@ -479,7 +503,7 @@ async function viewJobDetail(id, token) {
       <dt>Client</dt><dd><a href="#/clients/${esc(j.client_id)}">${esc(j.client_name)}</a></dd>
       <dt>Destinations</dt><dd>${j.destination_names.map(esc).join("<br>") || `<span class="bad-text">None</span>`}</dd>
       <dt>Backup ID</dt><dd class="mono">host/${esc(j.backup_id)}</dd>
-      <dt>Next run</dt><dd>${j.next_run ? esc(fmtTime(j.next_run)) : `<span class="muted">${j.enabled ? "Only by hand" : "Paused"}</span>`}</dd>
+      <dt>Next run</dt><dd>${j.next_run ? esc(fmtTime(j.next_run)) : `<span class="muted">${j.enabled ? "Only by hand" : "Disabled"}</span>`}</dd>
       <dt>Folders</dt><dd>${j.shares.map(s => `<div><span class="mono">${esc(s.path)}</span><div class="sub">saved as ${esc(s.archive)}.pxar</div></div>`).join("")}</dd>
       <dt>Excluded</dt><dd>${j.excludes.length ? j.excludes.map(e => `<div class="mono">${esc(e)}</div>`).join("") : `<span class="muted">Nothing</span>`}</dd>
       <dt>Change detection</dt><dd>${esc({metadata: "Metadata (fastest)", data: "Data", legacy: "Legacy"}[j.change_detection])}</dd>
@@ -513,9 +537,14 @@ async function viewJobDetail(id, token) {
     if (key !== lastSizes) { lastSizes = key; drawSize(sizes); }
     $("#runs").innerHTML = runsTable(runs, false);
     $("#j-run").innerHTML = runButton(job).replace("btn small", "btn primary");
+    // Follow changes made elsewhere, unless the switch is being used.
+    const sw = $("#j-switch input");
+    if (sw && sw.checked !== job.enabled && document.activeElement !== sw) { route(); return; }
     bindRowLinks();
     bindRunButtons(drawRuns);
   };
+  // The schedule, next run and Run now all change with it, so redraw the page.
+  bindSwitches(() => { if (token === routeToken) route(); });
   await drawRuns();
   poll(drawRuns, 5000);
   api("GET", `/jobs/${id}/snapshots`).then(({destinations}) => {
@@ -558,7 +587,7 @@ async function viewJobForm(id, token, presetClient) {
             <small>Each destination is backed up in turn. For an offsite copy, a sync job in PBS (one PBS pulling from another) reads the client's files only once.</small></div>
           <label class="field"><span>Backup ID</span><input type="text" name="backup_id" value="${esc(j.backup_id)}" class="mono" placeholder="The client's host name">
             <small>The group name on the server (host/<i>id</i>). Keep it the same so each run builds on the last one.</small></label>
-          <label class="check"><input type="checkbox" name="enabled" ${j.enabled ? "checked" : ""}><span><b>Run on schedule</b><br><span class="hint">Turn off to pause the job: it won't run on schedule or with Run now.</span></span></label>
+          <div class="field full">${switchHtml("enabled", j.enabled, "")}<small>A disabled job doesn't run, on its schedule or with Run now.</small></div>
         </div>
       </fieldset>
       <fieldset class="section"><legend>Folders to back up</legend>
@@ -600,6 +629,7 @@ async function viewJobForm(id, token, presetClient) {
     </form>`);
 
   const form = $("#jobform");
+  bindSwitches();
   const archiveFrom = p => { const b = (p.replace(/\/+$/, "").split("/").pop() || "root").replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^[-_]+|[-_]+$/g, ""); return (b || "root").slice(0, 48); };
   const drawShares = () => {
     $("#shares").innerHTML = shares.map((sh, i) => `<div class="share">
@@ -979,7 +1009,7 @@ async function viewClient(id, token) {
     <div class="cols"><div class="stack">
       <div class="panel" id="c-task" ${task && !task.done ? "" : "hidden"}><h2>Setup</h2></div>
       <div class="panel"><div class="pagehead m-0"><h2 class="m-0">Backup jobs</h2><a class="btn small" href="#/jobs/new/${esc(id)}">Add a backup job</a></div>
-        ${jobs.length ? `<ul class="steps mt-12">${jobs.map(j => `<li><a class="jobname" href="#/jobs/${esc(j.id)}">${esc(j.name)}</a> <span class="sub">${esc(schedText(j.schedule))}${j.enabled ? "" : ", paused"}</span></li>`).join("")}</ul>` : `<p class="muted mt-12">No jobs for this client yet.</p>`}</div>
+        ${jobs.length ? `<ul class="steps mt-12">${jobs.map(j => `<li><a class="jobname" href="#/jobs/${esc(j.id)}">${esc(j.name)}</a> <span class="sub">${esc(schedText(j.schedule))}${j.enabled ? "" : ", disabled"}</span></li>`).join("")}</ul>` : `<p class="muted mt-12">No jobs for this client yet.</p>`}</div>
       <div class="panel"><h2>Repair</h2><p class="hint m-0 mb-14">Runs setup again as root: reinstalls pbcm-runner, the pbcm account and its sudo rule, and the backup client if it's missing. Use it after reinstalling the client, if its host key changed, or if something was removed by hand.</p>
         <button class="btn" id="c-repair">Repair ${esc(c.name)}</button><div id="c-repair-flow"></div></div>
       <div class="panel"><h2>Remove</h2><p class="hint m-0 mb-14">Stops managing this client.</p>
@@ -1432,7 +1462,7 @@ function startImport(box, file, fileName, clients, token) {
         ${p.alerts ? `<label class="check"><input type="checkbox" name="import_alerts" ${opts.import_alerts ? "checked" : ""}><span><b>Import email alert settings</b><br><span class="hint">Mail server ${esc(p.alerts.host || "—")}, sending to ${esc(p.alerts.to || "—")}. Replaces the current alert settings.</span></span></label>
           ${p.alerts.password_needed && opts.import_alerts ? `<label class="field"><span>Mail server password</span><input type="password" name="alert_password" autocomplete="off" value="${esc(opts.alert_password)}"><small>Not in the file. Leave blank to enter it later on the Alerts page.</small></label>` : ""}` : ""}
         ${p.settings.length ? `<label class="check"><input type="checkbox" name="import_settings" ${opts.import_settings ? "checked" : ""}><span><b>Import settings</b><br><span class="hint">${esc(p.settings.join(", "))}</span></span></label>` : ""}
-        ${p.jobs.some(j => !j.skip) ? `<label class="check"><input type="checkbox" name="enable_schedules" ${opts.enable_schedules ? "checked" : ""}><span><b>Turn the jobs' schedules on now</b><br><span class="hint">Leave this off until the old server's schedules are stopped, or both will back up the same folders. You can turn each job on later by editing it.</span></span></label>` : ""}
+        ${p.jobs.some(j => !j.skip) ? `<label class="check"><input type="checkbox" name="enable_schedules" ${opts.enable_schedules ? "checked" : ""}><span><b>Enable the imported jobs now</b><br><span class="hint">Leave this off until the old server's schedules are stopped, or both will back up the same folders. You can enable each job later with the switch at the top of its page.</span></span></label>` : ""}
       </div>
       ${p.problems.length ? `<div class="result bad"><b>Before importing:</b><ul class="m-0">${p.problems.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
       ${msg || ""}
@@ -1448,7 +1478,7 @@ function startImport(box, file, fileName, clients, token) {
         const r = await api("POST", "/settings/import", {file, ...opts});
         if (!r.imported) { draw(r.plan); return; }
         const parts = [r.result.destinations && plural(r.result.destinations, "destination"), r.result.jobs && plural(r.result.jobs, "job")].filter(Boolean);
-        box.innerHTML = `<div class="result ok mt-12">Imported ${esc(parts.join(" and ") || "the settings")}.${r.result.jobs && !opts.enable_schedules ? " The jobs' schedules are off; turn them on once the old server is stopped." : ""} <a href="#/jobs">See the jobs</a></div>`;
+        box.innerHTML = `<div class="result ok mt-12">Imported ${esc(parts.join(" and ") || "the settings")}.${r.result.jobs && !opts.enable_schedules ? " The jobs are disabled; enable them once the old server is stopped." : ""} <a href="#/jobs">See the jobs</a></div>`;
       } catch (ex) { draw(lastPlan, `<div class="result bad">${esc(ex.message)}</div>`); }
     });
   };
