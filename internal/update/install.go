@@ -13,7 +13,7 @@ import (
 
 // The files swapped on an update. Others in the release (README, LICENSE)
 // aren't needed on the server.
-var programFiles = []string{"pbcm", "pbcm-runner", "MANIFEST", "MANIFEST.sig", "install.sh", "uninstall.sh"}
+var programFiles = []string{"pbcm", "pbcm-runner", "pbcm-runner-arm64", "MANIFEST", "MANIFEST.sig", "install.sh", "uninstall.sh"}
 
 // keepBackups is how many database copies taken before updates are kept.
 const keepBackups = 5
@@ -35,7 +35,7 @@ func (f Files) swapIn(staged string) error {
 			continue
 		}
 		mode := os.FileMode(0o644)
-		if name == "pbcm" || name == "pbcm-runner" || strings.HasSuffix(name, ".sh") {
+		if name == "pbcm" || strings.HasPrefix(name, "pbcm-runner") || strings.HasSuffix(name, ".sh") {
 			mode = 0o755
 		}
 		dst := filepath.Join(f.AppDir, name)

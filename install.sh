@@ -110,6 +110,11 @@ mv -f "$APP_DIR/pbcm.new" "$APP_DIR/pbcm"
 # The copy sent to clients during setup (always x86-64, like proxmox-backup-client).
 install -o "$USER_NAME" -g "$USER_NAME" -m 755 "$RUNNER_BIN" "$APP_DIR/pbcm-runner.new"
 mv -f "$APP_DIR/pbcm-runner.new" "$APP_DIR/pbcm-runner"
+# The copy for ARM64 clients (Raspberry Pi and the like), from 2.2.0.
+if [[ -f "${RUNNER_BIN}-arm64" ]]; then
+  install -o "$USER_NAME" -g "$USER_NAME" -m 755 "${RUNNER_BIN}-arm64" "$APP_DIR/pbcm-runner-arm64.new"
+  mv -f "$APP_DIR/pbcm-runner-arm64.new" "$APP_DIR/pbcm-runner-arm64"
+fi
 # The signed manifest lets the server send pbcm-runner updates to clients; the
 # scripts are kept so they can be run again later.
 REL_DIR="$(dirname "$BIN")"

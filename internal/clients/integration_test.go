@@ -22,6 +22,7 @@ import (
 //	PBCM_IT_PASSWORD  that user's password
 //	PBCM_IT_RUNNER    path to a linux/amd64 pbcm-runner build
 //	PBCM_IT_EXPECT    optional text the setup log must contain
+//	PBCM_IT_ARCH      the client's CPU ("uname -m"); x86_64 if unset
 func TestRealClient(t *testing.T) {
 	addrStr := os.Getenv("PBCM_IT_ADDR")
 	if addrStr == "" {
@@ -70,7 +71,11 @@ func TestRealClient(t *testing.T) {
 		t.Fatalf("setup log doesn't mention %q", want)
 	}
 	c, _ = st.GetClient(c.ID)
-	if c.Status != store.ClientReady || c.ClientVersion == "" || c.RunnerVersion == "" || c.Arch != "x86_64" {
+	wantArch := os.Getenv("PBCM_IT_ARCH") // the client's "uname -m"
+	if wantArch == "" {
+		wantArch = "x86_64"
+	}
+	if c.Status != store.ClientReady || c.ClientVersion == "" || c.RunnerVersion == "" || c.Arch != wantArch {
 		t.Fatalf("client after setup: %+v", c)
 	}
 	t.Logf("ready: %s, proxmox-backup-client %s, systemd %s", c.OSPretty, c.ClientVersion, c.SystemdVersion)

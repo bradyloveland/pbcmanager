@@ -50,14 +50,14 @@ type Manager struct {
 	// pbcm-runner on each client (by hash) and this server's copy.
 	runnerHashes   map[string]string
 	runnerUpdating map[string]bool
-	runnerCache    *serverRunner
+	runnerCache    map[string]*serverRunner // by CPU type
 
 	// Sync configures keeping clients in step (see sync.go).
 	Sync SyncConfig
 }
 
-// New returns a manager. runnerPath is the pbcm-runner executable to send
-// to clients (linux/amd64).
+// New returns a manager. runnerPath is the pbcm-runner for x86-64 clients;
+// the ARM64 one is next to it, with "-arm64" added (see runnerFile).
 func New(st *store.Store, id *sshx.Identity, runnerPath string) *Manager {
 	return &Manager{store: st, identity: id, runnerPath: runnerPath, timeout: 15 * time.Second,
 		tasks: tasks{items: map[string]*Task{}}, busy: map[string]bool{},
@@ -236,10 +236,51 @@ func (m *Manager) release(id string) {
 	delete(m.busy, id)
 }
 
-func (m *Manager) startSetup(c *store.Client, login Login, key ssh.PublicKey, kind string) (*Task, error) {
-	runnerBin, err := os.ReadFile(m.runnerPath)
+// CPU types clients can have, as Go names them.
+const (
+	ArchAMD64 = "amd64"
+	ArchARM64 = "arm64"
+)
+
+// clientArch maps "uname -m" to a CPU type, or "" if clients can't be that.
+func clientArch(uname string) string {
+	switch strings.TrimSpace(uname) {
+	case "x86_64", "amd64":
+		return ArchAMD64
+	case "aarch64", "arm64":
+		return ArchARM64
+	}
+	return ""
+}
+
+// runnerFile is the pbcm-runner this server sends to clients of a CPU type.
+func (m *Manager) runnerFile(arch string) string {
+	if arch == ArchARM64 {
+		return m.runnerPath + "-arm64"
+	}
+	return m.runnerPath
+}
+
+func (m *Manager) readRunner(arch string) ([]byte, error) {
+	data, err := os.ReadFile(m.runnerFile(arch))
 	if err != nil {
-		return nil, fmt.Errorf("this server's copy of pbcm-runner is missing (%s); reinstall the server", m.runnerPath)
+		return nil, fmt.Errorf("this server's copy of pbcm-runner for %s clients is missing (%s); reinstall the server", archName(arch), m.runnerFile(arch))
+	}
+	return data, nil
+}
+
+func archName(arch string) string {
+	if arch == ArchARM64 {
+		return "ARM64"
+	}
+	return "x86-64"
+}
+
+func (m *Manager) startSetup(c *store.Client, login Login, key ssh.PublicKey, kind string) (*Task, error) {
+	// Fail early if the server's own files are missing; the runner sent is
+	// chosen once the client's CPU type is known.
+	if _, err := m.readRunner(ArchAMD64); err != nil {
+		return nil, err
 	}
 	if !m.claim(c.ID) {
 		return nil, inputErr("Something is already being done on %s. Wait for it to finish.", c.Name)
@@ -249,7 +290,7 @@ func (m *Manager) startSetup(c *store.Client, login Login, key ssh.PublicKey, ki
 	_ = m.store.SaveClient(c)
 	go func() {
 		defer m.release(c.ID)
-		err := m.setup(t, c, login, key, runnerBin)
+		err := m.setup(t, c, login, key)
 		fresh, gerr := m.store.GetClient(c.ID)
 		if gerr != nil {
 			t.finish(err)
@@ -270,7 +311,7 @@ func (m *Manager) startSetup(c *store.Client, login Login, key ssh.PublicKey, ki
 
 var tmpDirRE = regexp.MustCompile(`^/[A-Za-z0-9._/\-]+/pbcm-setup\.[A-Za-z0-9]+$`)
 
-func (m *Manager) setup(t *Task, c *store.Client, login Login, key ssh.PublicKey, runnerBin []byte) error {
+func (m *Manager) setup(t *Task, c *store.Client, login Login, key ssh.PublicKey) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 	auth := sshx.PasswordAuth(login.Password)
@@ -310,6 +351,22 @@ func (m *Manager) setup(t *Task, c *store.Client, login Login, key ssh.PublicKey
 		t.Logf("Signed in as root.")
 	}
 
+	uname, _, _, err := sshx.Output(conn, "uname -m", nil)
+	if err != nil {
+		return fmt.Errorf("running a command on the client failed: %w", err)
+	}
+	arch := clientArch(uname)
+	if strings.TrimSpace(uname) == "" {
+		return errors.New("couldn't tell what CPU the client has (uname -m gave nothing)")
+	}
+	if arch == "" {
+		return fmt.Errorf("this machine's CPU is %s. Clients need x86-64, or ARM64 (aarch64, such as a Raspberry Pi with a 64-bit OS)", strings.TrimSpace(uname))
+	}
+	runnerBin, err := m.readRunner(arch)
+	if err != nil {
+		return err
+	}
+
 	out, _, code, err := sshx.Output(conn, "umask 077 && mktemp -d /tmp/pbcm-setup.XXXXXXXX", nil)
 	dir := strings.TrimSpace(out)
 	if err != nil || code != 0 || !tmpDirRE.MatchString(dir) {
@@ -323,7 +380,7 @@ func (m *Manager) setup(t *Task, c *store.Client, login Login, key ssh.PublicKey
 		}
 		return nil
 	}
-	t.Logf("Copying pbcm-runner and the setup script…")
+	t.Logf(fmt.Sprintf("Copying pbcm-runner for %s and the setup script…", archName(arch)))
 	for _, f := range []struct {
 		name string
 		data []byte

@@ -43,7 +43,11 @@ The project isn't affiliated with or endorsed by Proxmox Server Solutions GmbH. 
 
 ## Supported clients
 
-Clients must be **Debian 12 (bookworm) or 13 (trixie), or a system based on them**, on x86-64 (the only platform `proxmox-backup-client` is made for), with systemd. End-of-life releases aren't supported.
+Clients must be **Debian 12 (bookworm) or 13 (trixie), or a system based on them**, with systemd. End-of-life releases aren't supported.
+
+- **x86-64:** Debian 12 or 13, using Proxmox's `pbs-client` repository (`main`).
+- **ARM64 (aarch64), from 2.2.0:** Debian 13 only. Proxmox publishes ARM64 builds of `proxmox-backup-client` only for trixie, in the `test` component of its `pbs-client` repository. Setup adds `main test` on ARM64 clients and refuses Debian 12 based ones; community builds aren't used. When Proxmox moves the ARM64 builds into `main`, setup can drop `test`.
+- **`pbcm-runner`** is built for both CPU types (`pbcm-runner` and `pbcm-runner-arm64`). Setup checks `uname -m` before uploading the matching one, and each runner only accepts a signed update for its own CPU type.
 
 | Client | How `proxmox-backup-client` is installed |
 | --- | --- |
@@ -164,7 +168,7 @@ Clients must hold their PBS credentials, because they back up without the server
 
 ## Server
 
-- **One executable**, with the web UI built in (`go:embed`). It's pure Go, so it builds for x86-64 and ARM64 with no C compiler. The server can run on ARM even though clients can't. `pbcm-runner` builds from the same code.
+- **One executable**, with the web UI built in (`go:embed`). It's pure Go, so it builds for x86-64 and ARM64 with no C compiler. The server runs on either, and serves clients of either CPU type. `pbcm-runner` builds from the same code.
 - **Dependencies kept small:** `golang.org/x/crypto/ssh` and a pure-Go SQLite driver (`modernc.org/sqlite`). Anything else needs a reason.
 - **Web UI:** plain JavaScript with no framework and no CDNs, so it works offline under a strict CSP. It's split into a few files, all embedded in the executable.
 - **Runs as an unprivileged user,** `pbcm`. It never reads backup data. Backing up the server's own machine works like any other client, over SSH to `127.0.0.1`.
