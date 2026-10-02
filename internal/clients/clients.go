@@ -359,7 +359,9 @@ func (m *Manager) setup(t *Task, c *store.Client, login Login, key ssh.PublicKey
 	c.HostKey = sshx.FormatKey(key)
 	c.OfferedKey = ""
 	if err := m.refresh(ctx, c); err != nil {
-		return fmt.Errorf("setup finished, but signing in as pbcm failed: %s. If the client's SSH settings limit who can sign in (AllowUsers or AllowGroups), add pbcm", err)
+		return fmt.Errorf("setup finished, but the server couldn't sign in as pbcm: %s. "+
+			"The client's SSH settings may limit who can sign in: see any WARNING in the log above. "+
+			"On OpenMediaVault, run \"usermod -aG _ssh pbcm\" on the client. Then use Repair", strings.TrimRight(err.Error(), ". "))
 	}
 	t.Logf(fmt.Sprintf("Ready: %s, proxmox-backup-client %s.", c.OSPretty, orNone(c.ClientVersion)))
 	return nil

@@ -17,7 +17,11 @@ All notable changes to this project are documented here. The format follows
 - **The Dashboard groups backup jobs under their client,** in sections you expand or collapse by clicking the client's header. Each header shows the client's status, a job counter (running, failing and disabled jobs included) and a **Client details** button. Your browser remembers which sections are open, and a client with a failing job or a connection problem always opens by itself. ([#13](https://github.com/bradyloveland/pbcmanager/issues/13))
 - **Jobs have an Enabled switch** next to their name at the top of the job page, so a job can be turned on or off without opening Edit job. It replaces the job form's "Run on schedule" checkbox, which read oddly next to a "By hand only" schedule. A disabled job doesn't run, on schedule or with Run now, and the job lists say **Disabled** instead of "Paused". ([#10](https://github.com/bradyloveland/pbcmanager/issues/10))
 
+## [2.0.1] - 2026-10-01
+
 ### Fixed
+- **Adding an OpenMediaVault client failed after setup** because OMV only lets the `_ssh` group sign in over SSH (`AllowGroups root _ssh`). Setup now adds the `pbcm` account to an allowed group when sshd limits sign-ins by group. It never chooses one that grants admin rights, such as `sudo` or `docker`. When the limit is by user (`AllowUsers`) or a `Deny…` rule, setup leaves `sshd_config` alone and says exactly what to change. ([#9](https://github.com/bradyloveland/pbcmanager/issues/9))
+- When the server can't sign in as `pbcm` after setup, the message now says what to do, including the OpenMediaVault command, without a doubled full stop.
 - **Run now on a paused job.** The button was faded with the rest of the row, so it looked disabled, yet it still started a backup. A paused job now can't run at all: Run now is disabled, with a tooltip saying why, and the server refuses it too. Only the paused job's run history and next run are faded. ([#11](https://github.com/bradyloveland/pbcmanager/issues/11))
 
 ## [2.0.0] - 2026-10-01
@@ -129,6 +133,7 @@ First public release.
 ### Added
 - Initial release: destinations, backup jobs with schedules, folder browser, exclusions, speed limits, encryption keys, live logs, run cancellation, snapshot listing, email failure alerts, HTTPS with a self-signed certificate, systemd installer.
 
-[Unreleased]: https://github.com/bradyloveland/pbcmanager/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/bradyloveland/pbcmanager/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/bradyloveland/pbcmanager/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/bradyloveland/pbcmanager/releases/tag/v2.0.0
 [1.2.0]: https://github.com/bradyloveland/pbcmanager/releases/tag/v1.2.0
