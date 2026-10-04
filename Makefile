@@ -2,6 +2,8 @@ VERSION ?= $(shell cat internal/version/VERSION)
 # EXTRA_LDFLAGS is for CI's update tests (a test signing key, a fake version).
 LDFLAGS := -s -w -X github.com/bradyloveland/pbcmanager/internal/version.override=$(VERSION) $(EXTRA_LDFLAGS)
 DEV_DIR ?= $(CURDIR)/tmp/dev
+# DEV_BIND=0.0.0.0 makes make dev reachable from other machines (a dev VM).
+DEV_BIND ?= 127.0.0.1
 
 .PHONY: build test lint check dist dev clean
 
@@ -44,12 +46,12 @@ dist:
 	done
 	cd dist && shasum -a 256 *.tar.gz > SHA256SUMS
 
-# Run locally on http://127.0.0.1:8099 with throwaway settings in tmp/dev.
+# Run locally on http://$(DEV_BIND):8099 with throwaway settings in tmp/dev.
 dev:
 	mkdir -p $(DEV_DIR)
 	$(RUNNER_BUILD) -o $(DEV_DIR)/pbcm-runner ./cmd/pbcm-runner
 	$(RUNNER_BUILD_ARM64) -o $(DEV_DIR)/pbcm-runner-arm64 ./cmd/pbcm-runner
-	PBCM_CONFIG_DIR=$(DEV_DIR)/conf PBCM_DATA_DIR=$(DEV_DIR)/data go run ./cmd/pbcm network --bind 127.0.0.1 --port 8099 --tls off >/dev/null
+	PBCM_CONFIG_DIR=$(DEV_DIR)/conf PBCM_DATA_DIR=$(DEV_DIR)/data go run ./cmd/pbcm network --bind $(DEV_BIND) --port 8099 --tls off >/dev/null
 	PBCM_CONFIG_DIR=$(DEV_DIR)/conf PBCM_DATA_DIR=$(DEV_DIR)/data go run ./cmd/pbcm setup-code
 	PBCM_CONFIG_DIR=$(DEV_DIR)/conf PBCM_DATA_DIR=$(DEV_DIR)/data PBCM_RUNNER=$(DEV_DIR)/pbcm-runner go run ./cmd/pbcm serve
 
