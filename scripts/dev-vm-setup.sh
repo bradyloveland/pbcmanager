@@ -6,7 +6,8 @@
 #   sudo bash dev-vm-setup.sh [--user NAME] [--passwordless-sudo]
 #
 #   --user NAME            the account that does the development (default: the
-#                          user who ran sudo)
+#                          user who ran sudo, or run as root, the only
+#                          normal account)
 #   --passwordless-sudo    let that account use sudo without a password, so
 #                          Claude can run the install and update tests. Only
 #                          on a VM used for nothing else.
@@ -29,14 +30,29 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --user) [ $# -ge 2 ] || die "--user needs a name"; user="$2"; shift 2 ;;
     --passwordless-sudo) nopass=1; shift ;;
-    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown option $1 (see --help)" ;;
   esac
 done
 
 [ "$(id -u)" = 0 ] || die "run this as root: sudo bash $0"
+# Run from a directory every account can enter. Started from /root (mode
+# 0700), the steps run as the user inherit it, and go can't start its
+# compiler there: "fork/exec .../compile: permission denied".
+cd /
 if [ -z "$user" ] || [ "$user" = root ]; then
-  die "say which account does the development: --user NAME (not root)"
+  # Run as root without --user: use the only normal account, if there's one.
+  uid_min="$(awk '$1 == "UID_MIN" {print $2}' /etc/login.defs 2>/dev/null)"
+  accounts="$(getent passwd | awk -F: -v min="${uid_min:-1000}" \
+    '$3 >= min && $3 < 65534 && $7 !~ /(nologin|false)$/ {print $1}')"
+  if [ -n "$accounts" ] && [ "$(printf '%s\n' "$accounts" | wc -l)" = 1 ]; then
+    user="$accounts"
+    echo "Setting up for $user, the only normal account. To pick another: --user NAME"
+  elif [ -n "$accounts" ]; then
+    die "say which account does the development: --user NAME (one of: $(echo "$accounts" | paste -sd' '))"
+  else
+    die "there's no normal account to develop as. Create one first (adduser NAME), then run this again."
+  fi
 fi
 id "$user" >/dev/null 2>&1 || die "there's no account called $user. Create it first: adduser $user"
 # shellcheck source=/dev/null

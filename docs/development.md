@@ -76,7 +76,7 @@ A Debian 13 VM can run everything CI does, including Docker clients and the inst
    curl -fsSLO https://raw.githubusercontent.com/bradyloveland/pbcmanager/main/scripts/dev-vm-setup.sh
    sudo bash dev-vm-setup.sh --passwordless-sudo
    ```
-   Leave out `--passwordless-sudo` if the VM is used for anything else; Claude then can't run the tests that need root.
+   Leave out `--passwordless-sudo` if the VM is used for anything else; Claude then can't run the tests that need root. Logged in as root instead, it sets up the only normal account, or add `--user NAME` to pick one.
 3. Follow the steps it prints: sign in to Claude and GitHub, then `sudo systemctl enable --now claude-remote-control`.
 
 The script installs Go, Docker, shellcheck, staticcheck, gh, tmux and the claude CLI, clones the repository to `~/pbcmanager`, and sets `DEV_BIND=0.0.0.0` so `make dev` on the VM can be opened from other machines. It's safe to run again to update them. Don't copy the release signing key to the VM: releases are built and signed by GitHub.
