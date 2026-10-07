@@ -118,6 +118,11 @@ func Dispatch(env *Env, args []string) error {
 		return nil
 	case "package-info":
 		return PackageInfo(env)
+	case "package-update":
+		if len(args) < 2 {
+			return &UsageError{"package-update needs a version"}
+		}
+		return PackageUpdate(env, args[1])
 	case "detect":
 		info := Detect(env)
 		return json.NewEncoder(env.Stdout).Encode(info)

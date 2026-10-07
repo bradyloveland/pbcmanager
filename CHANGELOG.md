@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Update a client's proxmox-backup-client from the web UI.** Point at "update to … available" in the Clients list and click **Update now**, or use the button on the client's page or the Updates page. The client installs only that package, at the version shown, and never removes anything. It won't start while one of the client's backups is running. A new major version still has to be installed on the machine itself, because it usually comes with an OS upgrade.
+
 ## [2.3.0] - 2026-10-01
 
 ### Added

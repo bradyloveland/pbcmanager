@@ -77,8 +77,10 @@ type Host struct {
 	files    map[string][]byte
 	rootKey  ssh.PublicKey
 	failWith string
-	// candidate is the newest proxmox-backup-client in the fake package lists.
-	candidate string
+	// candidate is the newest proxmox-backup-client in the fake package
+	// lists, and installed the installed one ("" for 3.4.1-1).
+	candidate, installed string
+	aptFails             string // apt-get install prints this and fails
 	// uname is what "uname -m" says (x86_64 unless set).
 	uname string
 	// refusePbcm makes sshd turn the pbcm account away, as OpenMediaVault's
@@ -178,6 +180,23 @@ func (h *Host) OfferPackage(version string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.candidate = version
+}
+
+// FailAptWith makes apt-get install print msg and fail ("" to succeed).
+func (h *Host) FailAptWith(msg string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.aptFails = msg
+}
+
+// installedPackage is the installed proxmox-backup-client version.
+func (h *Host) installedPackage() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.installed == "" {
+		return "3.4.1-1"
+	}
+	return h.installed
 }
 
 // FailSetupWith makes setup.sh stop with this error.
@@ -419,22 +438,24 @@ func (h *Host) env(stdin io.Reader, stdout, stderr io.Writer) *runner.Env {
 		case "uname":
 			return h.machine() + "\n", nil
 		case "proxmox-backup-client":
-			return "client version: 3.4.1\n", nil
+			v, _, _ := strings.Cut(h.installedPackage(), "-")
+			return "client version: " + v + "\n", nil
 		case "systemctl":
 			return h.systemctl(args)
 		case "dpkg-query":
 			if args[len(args)-1] == "proxmox-backup-client" {
-				return "ii |3.4.1-1", nil
+				return "ii |" + h.installedPackage(), nil
 			}
 			return "", errors.New("no packages found")
 		case "apt-cache":
 			h.mu.Lock()
 			cand := h.candidate
 			h.mu.Unlock()
+			inst := h.installedPackage()
 			if cand == "" {
-				cand = "3.4.1-1"
+				cand = inst
 			}
-			return "proxmox-backup-client:\n  Installed: 3.4.1-1\n  Candidate: " + cand + "\n", nil
+			return "proxmox-backup-client:\n  Installed: " + inst + "\n  Candidate: " + cand + "\n", nil
 		case "dpkg":
 			// --compare-versions A gt B; the fake only offers newer versions.
 			if len(args) == 4 && args[1] != args[3] {
@@ -443,6 +464,17 @@ func (h *Host) env(stdin io.Reader, stdout, stderr io.Writer) *runner.Env {
 			return "", errors.New("exit 1")
 		case "getent":
 			return "pbcm:x:999:999::/var/lib/pbcm:/bin/sh\n", nil
+		case "env":
+			// env DEBIAN_FRONTEND=noninteractive apt-get install ... pkg=version
+			if len(args) > 2 && args[1] == "apt-get" && args[2] == "install" {
+				h.mu.Lock()
+				defer h.mu.Unlock()
+				if h.aptFails != "" {
+					return h.aptFails + "\n", errors.New("exit status 100")
+				}
+				_, h.installed, _ = strings.Cut(args[len(args)-1], "=")
+				return "Setting up proxmox-backup-client (" + h.installed + ") ...\n", nil
+			}
 		case "systemd-run":
 			// Measuring runs in the background on a real client; here it's
 			// done before systemd-run returns.

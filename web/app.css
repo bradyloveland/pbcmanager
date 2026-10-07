@@ -294,6 +294,14 @@ details.adv[open] > summary{margin-bottom:16px}
 .destname{font-size:14px}
 .spaceline{display:flex;justify-content:space-between;gap:10px;margin-top:4px}
 .warn-text{color:var(--warn)}
+/* The Clients list's update notice: "update to … available", and "Update now"
+   when pointed at. Both labels share one grid cell, so the width stays put. */
+.pkgupdate{display:inline-grid;color:var(--warn);text-decoration:none;font-size:inherit;text-align:left}
+.pkgupdate>span{grid-area:1/1}
+.pkgupdate .hover{visibility:hidden;text-decoration:underline;text-underline-offset:3px}
+.pkgupdate:hover:not(:disabled) .idle,.pkgupdate:focus-visible .idle{visibility:hidden}
+.pkgupdate:hover:not(:disabled) .hover,.pkgupdate:focus-visible .hover{visibility:visible}
+.pkgupdate.busy{color:var(--muted);cursor:progress}
 .notes{white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.5;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px 14px;max-height:340px;overflow:auto}
 .mt-8{margin-top:8px}
 .nowrap{white-space:nowrap}

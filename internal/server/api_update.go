@@ -94,7 +94,7 @@ func (s *Server) apiUpdate(w http.ResponseWriter, r *http.Request) (any, error) 
 	for _, c := range list {
 		st := s.clients.RunnerState(c.ID)
 		cl = append(cl, map[string]any{"id": c.ID, "name": c.Name, "runner_version": c.RunnerVersion, "runner_state": st, "runner_label": runnerLabel[st],
-			"client_version": c.ClientVersion, "os_pretty": c.OSPretty, "package": packageView(s.clients.Package(c.ID))})
+			"client_version": c.ClientVersion, "os_pretty": c.OSPretty, "status": c.Status, "package": packageView(s.clients.Package(c.ID))})
 	}
 	return map[string]any{
 		"version": version.Version, "arch": runtime.GOARCH, "cant_update": s.updater.CantUpdate(), "check": check, "newer": newer,

@@ -43,7 +43,16 @@ Each client has its own copy of its jobs, as systemd timers, and the credentials
 
 ## proxmox-backup-client updates
 
-Clients get `proxmox-backup-client` updates through their own package updates, like any other package. PBC Manager never installs or upgrades packages. Each client checks its package lists once a day, without running `apt update`. When a newer version is listed, the Clients list, the client page and the Updates page say so. Update it the way you update the rest of that machine: OpenMediaVault's Update Management, Proxmox VE's Updates page, or `apt update && apt upgrade`. To be emailed about it, turn on **When a client's proxmox-backup-client has an update waiting** under **Alerts**.
+Each client checks its package lists once a day, without running `apt update`. When a newer `proxmox-backup-client` is listed, the Clients list, the client page and the Updates page say so. To be emailed about it, turn on **When a client's proxmox-backup-client has an update waiting** under **Alerts**.
+
+To install a bug-fix version from here, point at "update to … available" in the Clients list and click **Update now**, or use **Update now** on the client's page or the Updates page. The client then:
+
+- installs only `proxmox-backup-client` (or `-static`), at exactly the version shown, plus anything that version needs. It never removes packages and keeps any changed config files.
+- refuses while one of its backups is running. Try again when it has finished.
+- waits for another program that's installing updates (such as unattended upgrades) to finish first.
+- runs `apt update` and tries again if its package lists are too old to download that version.
+
+A new major version (say 5.x on a client running 4.x) usually comes with an upgrade of the operating system, so there's no button for it: follow Proxmox's upgrade notes on the machine itself. You can still update any client the way you update the rest of that machine: OpenMediaVault's Update Management, Proxmox VE's Updates page, or `apt update && apt upgrade`.
 
 ## Raspberry Pi and other ARM64 machines
 

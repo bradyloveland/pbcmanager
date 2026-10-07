@@ -51,6 +51,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/clients/{id}", priv(s.apiClient))
 	m.HandleFunc("POST /api/clients/{id}/check", priv(s.apiClientCheck))
 	m.HandleFunc("POST /api/clients/{id}/repair", priv(s.apiClientRepair))
+	m.HandleFunc("POST /api/clients/{id}/package-update", priv(s.apiClientPackageUpdate))
 	m.HandleFunc("GET /api/clients/{id}/browse", priv(s.apiClientBrowse))
 	m.HandleFunc("GET /api/clients/{id}/filesystems", priv(s.apiClientFilesystems))
 	m.HandleFunc("POST /api/clients/{id}/remove", priv(s.apiClientRemove))
