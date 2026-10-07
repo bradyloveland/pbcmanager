@@ -1060,15 +1060,40 @@ async function viewRun(clientId, runId, token) {
 const CLIENT_STATUS = {ready: ["ok", "Ready"], "setting-up": ["busy", "Setting up"], error: ["bad", "Needs attention"],
   unreachable: ["warn", "Can't connect"], "host-key-changed": ["bad", "Host key changed"]};
 // pkgNote says when a client's proxmox-backup-client has a newer version in
-// its package lists ("" if not). It's only reported: updates are installed
-// the way the rest of the machine is updated.
+// its package lists ("" if not). A bug-fix version can be installed from here
+// (pkgCanUpdate); a new major version is left to the machine's own upgrade.
 function pkgNote(c, long) {
   const p = c.package;
   if (!p || !p.update_available) return "";
   const v = p.info.candidate;
   if (!long) return p.major ? `${v} available (major version)` : `update to ${v} available`;
   return p.major ? `Version ${v} is available. It's a new major version, which usually comes with an upgrade of the operating system: check Proxmox's upgrade notes first.`
-    : `Version ${v} is available. Update it the way you update the rest of this machine.`;
+    : `Version ${v} is available.`;
+}
+const pkgCanUpdate = c => c.status === "ready" && c.package && c.package.update_available && !c.package.major;
+// pkgUpdateLink is the Clients list's update notice: it reads "update to …
+// available", and "Update now" when pointed at.
+function pkgUpdateLink(c) {
+  const v = c.package.info.candidate;
+  return `<button type="button" class="linkbtn pkgupdate" data-pkg-update="${esc(c.id)}" title="Update proxmox-backup-client to ${esc(v)} now" aria-label="Update proxmox-backup-client to ${esc(v)} now">
+    <span class="idle">update to ${esc(v)} available</span><span class="hover">Update now</span></button>`;
+}
+// bindPkgUpdates wires every [data-pkg-update] button for these clients.
+function bindPkgUpdates(clients) {
+  $$("[data-pkg-update]").forEach(b => b.addEventListener("click", async e => {
+    e.stopPropagation();
+    const c = clients.find(x => x.id === b.dataset.pkgUpdate);
+    if (!c || !c.package) return;
+    const {installed, candidate} = c.package.info;
+    if (!confirm(`Update proxmox-backup-client on ${c.name} from ${installed} to ${candidate}?\n\nThis installs only that package, with apt-get on ${c.name}. It takes a minute or two, and won't start while a backup is running there.`)) return;
+    b.disabled = true; b.classList.add("busy");
+    const label = b.innerHTML; b.textContent = "Updating…";
+    try {
+      await api("POST", `/clients/${c.id}/package-update`, {version: candidate});
+      toast(`${c.name} now has proxmox-backup-client ${candidate}.`);
+      route();
+    } catch (ex) { toast(ex.message, "bad"); b.innerHTML = label; b.disabled = false; b.classList.remove("busy"); }
+  }));
 }
 const clientPill = st => { const [cls, label] = CLIENT_STATUS[st] || ["warn", st]; return `<span class="pill ${cls}">${esc(label)}</span>`; };
 function ago(ts) {
@@ -1093,7 +1118,7 @@ function clientsTable(clients) {
       <td><a class="jobname" href="#/clients/${esc(c.id)}">${esc(c.name)}</a><div class="sub mono">${esc(c.address)}${c.port === 22 ? "" : ":" + esc(c.port)}</div></td>
       <td>${clientPill(c.status)}</td>
       <td class="small">${esc(c.os_pretty || "—")}${c.arch ? `<div class="sub">${esc(c.arch)}</div>` : ""}</td>
-      <td class="small">${c.client_version ? esc(c.client_version) : "—"}${pkgNote(c) ? `<div class="sub warn-text">${esc(pkgNote(c))}</div>` : ""}</td>
+      <td class="small">${c.client_version ? esc(c.client_version) : "—"}${pkgCanUpdate(c) ? `<div class="sub">${pkgUpdateLink(c)}</div>` : pkgNote(c) ? `<div class="sub warn-text">${esc(pkgNote(c))}</div>` : ""}</td>
       <td class="small">${esc(ago(c.last_contact))}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
@@ -1104,6 +1129,7 @@ async function viewClients(token) {
     <a class="btn primary" href="#/clients/new">Add a client</a></div>
     ${clients.length ? clientsTable(clients) : `<div class="panel empty"><h2>No clients yet</h2><p>Add a Linux machine you can reach over SSH from this server, on your network or over a VPN.</p><a class="btn primary" href="#/clients/new">Add a client</a></div>`}`);
   bindRowLinks();
+  bindPkgUpdates(clients);
 }
 
 // Follows a task's log into box until it finishes, then calls done(view).
@@ -1263,6 +1289,7 @@ async function viewClient(id, token) {
       <dt>Time zone</dt><dd>${esc(c.timezone || "Unknown (schedules shown in this server's time)")}</dd>
       <dt>Backup client</dt><dd>${c.client_version ? `proxmox-backup-client ${esc(c.client_version)}` : `<span class="muted">Not found</span>`}
         ${pkgNote(c, true) ? `<div class="sub warn-text">${esc(pkgNote(c, true))}</div>` : ""}
+        ${pkgCanUpdate(c) ? `<button type="button" class="btn small mt-8" data-pkg-update="${esc(c.id)}">Update now</button>` : ""}
         ${c.package && c.package.info.lists_updated ? `<div class="sub">Package lists updated ${esc(ago(c.package.info.lists_updated))}, checked ${esc(ago(c.package.info.checked))}.</div>` : ""}</dd>
       <dt>pbcm-runner</dt><dd>${esc(c.runner_version || "—")}</dd>
       <dt>Last contact</dt><dd>${esc(ago(c.last_contact))}</dd>
@@ -1282,6 +1309,7 @@ async function viewClient(id, token) {
     } catch (ex) { toast(ex.message, "bad"); e.target.disabled = false; }
   };
   $("#c-browse").onclick = () => pickFolder(id, "/", false);
+  bindPkgUpdates([c]);
   if ($("#c-apply")) $("#c-apply").onclick = async e => {
     e.target.disabled = true;
     try { await api("POST", `/clients/${id}/apply`); toast("Settings sent."); route(); }
@@ -1507,13 +1535,15 @@ async function viewUpdates(token) {
       <p class="hint">Puts back the previous version and the database as it was just before the update. Changes made since then (jobs, settings, run history collected by the server) are lost; clients keep their own run history.</p>
       <button class="btn danger" id="u-rollback">Go back to ${esc(u.rollback_to)}</button></div>` : ""}
     ${u.clients.some(x => x.package && x.package.update_available) ? `<div class="panel"><h2>proxmox-backup-client updates</h2>
-      <p class="hint m-0 mb-14">These clients have a newer proxmox-backup-client in their package lists. PBC Manager doesn't install packages: update each one the way you update the rest of the machine (OpenMediaVault's Update Management, Proxmox VE's Updates page, or <span class="mono">apt update &amp;&amp; apt upgrade</span>).</p>
-      <div class="tablewrap"><table><thead><tr><th>Client</th><th>Installed</th><th>Available</th></tr></thead><tbody>
+      <p class="hint m-0 mb-14">These clients have a newer proxmox-backup-client in their package lists. <b>Update now</b> installs just that package on the client. A new major version usually comes with an upgrade of the operating system, so update it on the machine itself, following Proxmox's upgrade notes.</p>
+      <div class="tablewrap"><table><thead><tr><th>Client</th><th>Installed</th><th>Available</th><th></th></tr></thead><tbody>
       ${u.clients.filter(x => x.package && x.package.update_available).map(x => `<tr><td><a href="#/clients/${esc(x.id)}">${esc(x.name)}</a><div class="sub">${esc(x.os_pretty || "")}</div></td>
-        <td class="mono small nowrap">${esc(x.package.info.installed)}</td><td class="mono small"><span class="nowrap">${esc(x.package.info.candidate)}</span>${x.package.major ? ` <span class="pill warn">Major version</span>` : ""}</td></tr>`).join("")}
+        <td class="mono small nowrap">${esc(x.package.info.installed)}</td><td class="mono small"><span class="nowrap">${esc(x.package.info.candidate)}</span>${x.package.major ? ` <span class="pill warn">Major version</span>` : ""}</td>
+        <td class="right">${pkgCanUpdate(x) ? `<button type="button" class="btn small" data-pkg-update="${esc(x.id)}">Update now</button>` : ""}</td></tr>`).join("")}
       </tbody></table></div></div>` : ""}
     <div class="panel"><h2>Clients</h2><p class="hint m-0 mb-14">After the server updates, it sends the matching pbcm-runner to each client the next time it checks in. Each client checks the signature before replacing anything.</p>${runnerRows}</div>`);
 
+  bindPkgUpdates(u.clients);
   const progress = $("#u-progress");
   const install = async () => {
     progress.innerHTML = `<div class="result info mt-12">Installing. The server restarts in a moment…</div>`;

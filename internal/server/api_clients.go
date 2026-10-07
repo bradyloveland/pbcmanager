@@ -136,6 +136,25 @@ func (s *Server) apiClientCheck(w http.ResponseWriter, r *http.Request) (any, er
 	return out, nil
 }
 
+// apiClientPackageUpdate installs the proxmox-backup-client update the
+// client's page shows. apt-get can take a few minutes on a slow machine, and
+// it carries on if the browser goes away: stopping it halfway is worse.
+func (s *Server) apiClientPackageUpdate(w http.ResponseWriter, r *http.Request) (any, error) {
+	var in struct {
+		Version string `json:"version"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Minute)
+	defer cancel()
+	c, err := s.clients.UpdatePackage(ctx, r.PathValue("id"), in.Version)
+	if err != nil {
+		return nil, clientError(err)
+	}
+	return map[string]any{"client": s.clientViewFull(c)}, nil
+}
+
 func (s *Server) apiClientRepair(w http.ResponseWriter, r *http.Request) (any, error) {
 	var in struct {
 		Login   clients.Login `json:"login"`
