@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-10-07
+
 ### Added
 - **Update a client's proxmox-backup-client from the web UI.** Point at "update to … available" in the Clients list and click **Update now**, or use the button on the client's page or the Updates page. The client installs only that package, at the version shown, and never removes anything. It won't start while one of the client's backups is running. A new major version still has to be installed on the machine itself, because it usually comes with an OS upgrade.
 
@@ -158,7 +160,8 @@ First public release.
 ### Added
 - Initial release: destinations, backup jobs with schedules, folder browser, exclusions, speed limits, encryption keys, live logs, run cancellation, snapshot listing, email failure alerts, HTTPS with a self-signed certificate, systemd installer.
 
-[Unreleased]: https://github.com/bradyloveland/pbcmanager/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/bradyloveland/pbcmanager/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/bradyloveland/pbcmanager/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/bradyloveland/pbcmanager/compare/v2.2.1...v2.3.0
 [2.2.1]: https://github.com/bradyloveland/pbcmanager/compare/v2.2.0...v2.2.1
 [2.2.0]: https://github.com/bradyloveland/pbcmanager/compare/v2.1.0...v2.2.0
