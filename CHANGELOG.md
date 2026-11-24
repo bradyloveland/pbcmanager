@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-11-23
+
 ### Added
 - **Client tags.** Give clients tags, such as "home", "offsite" or "Raspberry Pi", on the client's page. **Group by → Tag** on the Dashboard, the Backup jobs page and the Clients list then shows each tag's clients with their backup jobs, so jobs with the same name on different clients are easy to tell apart. Tags are included in settings exports.
 
@@ -163,7 +165,8 @@ First public release.
 ### Added
 - Initial release: destinations, backup jobs with schedules, folder browser, exclusions, speed limits, encryption keys, live logs, run cancellation, snapshot listing, email failure alerts, HTTPS with a self-signed certificate, systemd installer.
 
-[Unreleased]: https://github.com/bradyloveland/pbcmanager/compare/v2.4.0...HEAD
+[Unreleased]: https://github.com/bradyloveland/pbcmanager/compare/v2.5.0...HEAD
+[2.5.0]: https://github.com/bradyloveland/pbcmanager/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/bradyloveland/pbcmanager/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/bradyloveland/pbcmanager/compare/v2.2.1...v2.3.0
 [2.2.1]: https://github.com/bradyloveland/pbcmanager/compare/v2.2.0...v2.2.1
