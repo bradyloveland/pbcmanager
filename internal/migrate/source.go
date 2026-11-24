@@ -56,6 +56,7 @@ type SrcJob struct {
 type SrcClient struct {
 	Key, Name, Address string
 	Port               int
+	Tags               []string
 }
 
 // ErrUnknown means the file isn't something that can be imported.

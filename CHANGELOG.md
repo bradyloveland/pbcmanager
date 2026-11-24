@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Client tags.** Give clients tags, such as "home", "offsite" or "Raspberry Pi", on the client's page. **Group by → Tag** on the Dashboard, the Backup jobs page and the Clients list then shows each tag's clients with their backup jobs, so jobs with the same name on different clients are easy to tell apart. Tags are included in settings exports.
+
 ## [2.4.0] - 2026-10-07
 
 ### Added

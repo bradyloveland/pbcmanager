@@ -50,7 +50,7 @@ func clientView(c *store.Client) map[string]any {
 		"arch": c.Arch, "hostname": c.Hostname, "systemd_version": c.SystemdVersion, "client_version": c.ClientVersion,
 		"runner_version": c.RunnerVersion, "server_here": c.ServerHere, "last_contact": c.LastContact,
 		"created_at": c.CreatedAt, "host_key_fingerprint": "", "offered_fingerprint": "", "timezone": c.Timezone,
-		"unreachable_since": c.UnreachableSince,
+		"unreachable_since": c.UnreachableSince, "tags": c.Tags,
 	}
 	if k, err := sshx.ParseKey(c.HostKey); err == nil {
 		v["host_key_fingerprint"] = sshx.Fingerprint(k)
@@ -149,6 +149,39 @@ func (s *Server) apiClientPackageUpdate(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Minute)
 	defer cancel()
 	c, err := s.clients.UpdatePackage(ctx, r.PathValue("id"), in.Version)
+	if err != nil {
+		return nil, clientError(err)
+	}
+	return map[string]any{"client": s.clientViewFull(c)}, nil
+}
+
+// apiClientTags replaces a client's tags.
+func (s *Server) apiClientTags(w http.ResponseWriter, r *http.Request) (any, error) {
+	var in struct {
+		Tags []string `json:"tags"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	id := r.PathValue("id")
+	list, err := s.store.ListClients()
+	if err != nil {
+		return nil, err
+	}
+	var others []*store.Client
+	for _, c := range list {
+		if c.ID != id {
+			others = append(others, c)
+		}
+	}
+	tags, err := store.CleanTags(in.Tags, store.AllTags(others))
+	if err != nil {
+		return nil, badRequest("%s.", capitalize(err.Error()))
+	}
+	if err := s.store.SetClientTags(id, tags); err != nil {
+		return nil, clientError(err)
+	}
+	c, err := s.store.GetClient(id)
 	if err != nil {
 		return nil, clientError(err)
 	}

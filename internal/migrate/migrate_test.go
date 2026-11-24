@@ -154,6 +154,7 @@ func TestExportRoundTripWithoutCredentials(t *testing.T) {
 	p, _ := Prepare(env, src, Options{ClientID: c.ID, EnableSchedules: true}, true)
 	Apply(env.Store, p)
 
+	env.Store.SetClientTags(c.ID, []string{"NAS", "home"})
 	a := alerts.Defaults()
 	a.Password = "mail-secret"
 	e, err := BuildExport(env.Store, map[string]any{"history.client_runs": 700}, a, "server1", time.Now())
@@ -181,8 +182,20 @@ func TestExportRoundTripWithoutCredentials(t *testing.T) {
 	if !p2.Ready || p2.NeedsClient || p2.Jobs[0].Client != "OMV" || p2.Jobs[0].KeyfilePassword != "needed" {
 		t.Fatalf("export plan: %+v %+v", p2.Problems, p2.Jobs)
 	}
+	if len(p2.ClientTags) != 1 || p2.ClientTags[0].Client != "OMV" || strings.Join(p2.ClientTags[0].Tags, ",") != "NAS,home" {
+		t.Fatalf("tags in the plan: %+v", p2.ClientTags)
+	}
 	if r, err := Apply(env2.Store, p2); err != nil || r.Jobs != 1 || r.Settings["history.client_runs"] != 700 {
 		t.Fatalf("apply: %+v %v", r, err)
+	}
+	if got, _ := env2.Store.GetClient("c1"); strings.Join(got.Tags, ",") != "NAS,home" {
+		t.Fatalf("tags after import: %q", got.Tags)
+	}
+	// Tags already set here are kept.
+	env4, _ := testEnv(t)
+	env4.Store.SetClientTags("c1", []string{"offsite"})
+	if p4, _ := Prepare(env4, src2, Options{Secrets: map[string]string{e.Destinations[0].ID: "tok2"}}, true); len(p4.ClientTags) != 0 {
+		t.Fatalf("existing tags would change: %+v", p4.ClientTags)
 	}
 
 	// A job whose client isn't on the new server is skipped, saying why.
