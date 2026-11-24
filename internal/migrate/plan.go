@@ -45,14 +45,23 @@ type Plan struct {
 	Jobs         []PlanJob   `json:"jobs"`
 	Alerts       *PlanAlerts `json:"alerts"`
 	Settings     []string    `json:"settings"` // labels of settings that would change
+	// ClientTags are tags from the file for clients here that have none yet.
+	ClientTags []PlanTags `json:"client_tags"`
 	// Problems must be fixed before importing.
 	Problems []string `json:"problems"`
 	Ready    bool     `json:"ready"`
 
 	newDests []*store.Destination
 	newJobs  []*store.Job
+	tags     map[string][]string // client ID: tags to set
 	alerts   *alerts.Settings
 	settings map[string]any
+}
+
+// PlanTags are the tags a client here gets from the file.
+type PlanTags struct {
+	Client string   `json:"client"`
+	Tags   []string `json:"tags"`
 }
 
 // PlanDest is one destination in the file.
@@ -176,8 +185,19 @@ func Prepare(env Env, src *Source, opts Options, final bool) (*Plan, error) {
 		}
 	}
 	srcClients := map[string]SrcClient{}
-	for _, c := range src.Clients {
-		srcClients[c.Key] = c
+	p.ClientTags, p.tags = []PlanTags{}, map[string][]string{}
+	inUse := store.AllTags(clients)
+	for _, sc := range src.Clients {
+		srcClients[sc.Key] = sc
+		// Tags come across only for a client here that has none, so tags
+		// already set here are never changed.
+		if c := matchClient(clients, sc); c != nil && len(c.Tags) == 0 && len(sc.Tags) > 0 && p.tags[c.ID] == nil {
+			if tags, err := store.CleanTags(sc.Tags, inUse); err == nil && len(tags) > 0 {
+				p.tags[c.ID] = tags
+				p.ClientTags = append(p.ClientTags, PlanTags{Client: c.Name, Tags: tags})
+				inUse = append(inUse, tags...)
+			}
+		}
 	}
 	jobNames := map[string]map[string]bool{} // client ID: lower-case names taken
 	existingJobs, err := st.ListJobs("")
@@ -389,6 +409,11 @@ func Apply(st *store.Store, p *Plan) (*Result, error) {
 			return r, fmt.Errorf("saving destination %s: %w", d.Name, err)
 		}
 		r.Destinations++
+	}
+	for id, tags := range p.tags {
+		if err := st.SetClientTags(id, tags); err != nil && !errors.Is(err, store.ErrNotFound) {
+			return r, fmt.Errorf("saving tags: %w", err)
+		}
 	}
 	seen := map[string]bool{}
 	for _, j := range p.newJobs {

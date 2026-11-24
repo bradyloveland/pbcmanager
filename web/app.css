@@ -227,6 +227,9 @@ tr.clickable:hover td{background:var(--surface-2)}
 .cgmeta{margin-left:auto}
 .busy-text{color:var(--accent)}
 .cgbody > .ledger{border:0;border-top:1px solid var(--line);border-radius:0}
+.cgclient{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-top:1px solid var(--line);padding:10px 20px;background:var(--surface-2)}
+.cgclient .jobname{font-weight:600}
+.cgclient + .ledger{border:0;border-top:1px solid var(--line);border-radius:0}
 .cgempty{border-top:1px solid var(--line);padding:14px 20px;font-size:14px}
 @media (prefers-reduced-motion:reduce){.chev{transition:none}}
 @media (max-width:640px){.cgmeta{margin-left:0;flex-basis:100%}.cghead{flex-wrap:wrap}}
@@ -376,3 +379,15 @@ dialog::backdrop{background:rgba(10,18,26,.5)}
   .share-head{display:none}
   h1{font-size:23px}
 }
+
+/* Client tags */
+.tags{display:inline-flex;flex-wrap:wrap;gap:4px;vertical-align:middle}
+.tag{display:inline-flex;align-items:center;gap:2px;font-size:12px;font-weight:550;border:1px solid var(--line);border-radius:20px;padding:0 8px;line-height:20px;color:var(--muted);background:var(--surface-2);white-space:nowrap}
+.tagedit .tag{font-size:13px;padding-right:2px}
+.tag button{background:none;border:0;color:inherit;cursor:pointer;font-size:15px;line-height:1;padding:0 5px;border-radius:20px}
+.tag button:hover{color:var(--bad)}
+.tag button:focus-visible{outline:3px solid var(--focus)}
+.tagadd{display:flex;gap:8px;align-items:center;max-width:360px}
+.tagadd input{flex:1;min-width:0}
+.groupby{display:inline-flex;align-items:center;gap:8px}
+.groupby .seg label{padding:4px 12px;font-size:13.5px}

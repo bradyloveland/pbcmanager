@@ -261,6 +261,7 @@ async function viewDashboard(token) {
     const [{jobs}, {sizes}, {destinations}, fresh, {metrics}] = await Promise.all([api("GET", "/jobs"), api("GET", "/sizes"), api("GET", "/destinations"), api("GET", "/clients"), api("GET", "/metrics")]);
     if (token !== routeToken) return;
     clients = fresh.clients;
+    const byTag = hasTags(clients) && groupBy("dashboard", "client") === "tag";
     const trouble = clients.filter(c => c.status !== "ready" && c.status !== "setting-up");
     const head = trouble.length ? (trouble.length === 1 ? `${trouble[0].name} needs attention` : `${trouble.length} clients need attention`)
       : clients.length === 1 ? "Your client is ready" : `All ${clients.length} clients are ready`;
@@ -270,9 +271,12 @@ async function viewDashboard(token) {
     else if (!trouble.length && jobs.length) title = jobs.length === 1 ? "Your backup job is healthy" : `All ${jobs.length} backup jobs are healthy`;
     render(`<div class="health ${cls}"><span class="dot"></span><h1>${esc(title)}</h1></div>${updateNote}${twoStep}${jobs.length ? noAlerts : ""}
       ${jobs.length ? sizeTiles(sizes, destinations, jobs, clients) + metricCards(metrics) : `<div class="panel empty"><h2>No backup jobs yet</h2><p>Your clients are ready. Add a destination for your Proxmox Backup Server, then create a job to choose folders and a schedule.</p><div class="btnrow"><a class="btn primary" href="#/jobs/new">Create a backup job</a><a class="btn" href="#/destinations/new">Add a destination</a></div></div>`}
-      <div class="pagehead mt-16 m-0"><h2 class="m-0">Clients and their backups</h2>${clients.length > 1 ? `<div class="btnrow"><button class="btn small" data-groups="open">Expand all</button><button class="btn small" data-groups="close">Collapse all</button></div>` : ""}</div>
-      <div class="cgroups">${clientGroups(clients, jobs, sizes)}</div>`);
+      <div class="pagehead mt-16 m-0"><h2 class="m-0">${byTag ? "Clients and their backups, by tag" : "Clients and their backups"}</h2><div class="btnrow">
+        ${hasTags(clients) ? groupByPicker("dashboard", byTag ? "tag" : "client", [["client", "Client"], ["tag", "Tag"]]) : ""}
+        ${clients.length > 1 ? `<button class="btn small" data-groups="open">Expand all</button><button class="btn small" data-groups="close">Collapse all</button>` : ""}</div></div>
+      <div class="cgroups">${byTag ? tagGroups(clients, jobs, sizes) : clientGroups(clients, jobs, sizes)}</div>`);
     bindClientGroups(draw);
+    bindGroupBy(draw);
     bindRowLinks();
     bindRunButtons(draw);
     bindSizeButtons(draw);
@@ -389,6 +393,39 @@ function metricCards(m) {
 // drawBars sizes the daily bars (set from script: the CSP allows no inline styles).
 function drawBars(root) { $$(".bars i[data-h]", root).forEach(i => { i.style.height = i.dataset.h + "%"; }); }
 
+/* ---------- client tags ---------- */
+const tagPills = c => (c.tags || []).length ? `<span class="tags">${c.tags.map(t => `<span class="tag">${esc(t)}</span>`).join("")}</span>` : "";
+const hasTags = clients => clients.some(c => (c.tags || []).length);
+// tagBuckets puts each client under each of its tags, by tag name, with
+// untagged clients last ({tag: ""}).
+function tagBuckets(clients) {
+  const byTag = new Map();
+  for (const c of [...clients].sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const t of (c.tags || []).length ? c.tags : [""]) {
+      if (!byTag.has(t)) byTag.set(t, []);
+      byTag.get(t).push(c);
+    }
+  }
+  return [...byTag].map(([tag, list]) => ({tag, clients: list}))
+    .sort((a, b) => (a.tag === "") - (b.tag === "") || a.tag.localeCompare(b.tag, undefined, {sensitivity: "base"}));
+}
+// How each page groups clients is remembered in this browser only.
+const GROUPBY_KEY = "pbcm.groupby";
+function groupBy(page, fallback) {
+  try { return JSON.parse(localStorage.getItem(GROUPBY_KEY) || "{}")[page] || fallback; } catch (_) { return fallback; }
+}
+function setGroupBy(page, v) {
+  try { const s = JSON.parse(localStorage.getItem(GROUPBY_KEY) || "{}"); s[page] = v; localStorage.setItem(GROUPBY_KEY, JSON.stringify(s)); } catch (_) {}
+}
+// groupByPicker is the "Group by" control; choices are [value, label] pairs.
+function groupByPicker(page, cur, choices) {
+  return `<div class="groupby"><span class="sub">Group by</span><div class="seg" role="radiogroup" aria-label="Group by">
+    ${choices.map(([v, label]) => `<label><input type="radio" name="groupby-${esc(page)}" value="${esc(v)}" data-groupby="${esc(page)}" ${v === cur ? "checked" : ""}>${esc(label)}</label>`).join("")}</div></div>`;
+}
+function bindGroupBy(redraw) {
+  $$("[data-groupby]").forEach(i => i.addEventListener("change", () => { setGroupBy(i.dataset.groupby, i.value); redraw(); }));
+}
+
 /* ---------- clients and their jobs (Dashboard) ---------- */
 // Which client sections are open is remembered in this browser only.
 const GROUPS_KEY = "pbcm.dashboard.open";
@@ -416,7 +453,7 @@ function clientGroups(clients, jobs, sizes) {
         <button type="button" class="cgtoggle" aria-expanded="${open}" aria-controls="${esc(id)}" data-group="${esc(c.id)}" ${s.trouble || clients.length === 1 ? 'data-pinned="1"' : ""}>
           <span class="chev" aria-hidden="true"></span>
           <span class="cgname"><b>${esc(c.name)}</b><span class="sub mono">${esc(c.address)}${c.port === 22 ? "" : ":" + esc(c.port)}</span></span>
-          ${clientPill(c.status)}
+          ${clientPill(c.status)}${tagPills(c)}
           <span class="cgcounts">${counts.map(x => `<span class="${/failing/.test(x) ? "bad-text" : /running/.test(x) ? "busy-text" : ""}">${esc(x)}</span>`).join(" · ")}</span>
           <span class="cgmeta sub">${esc(ago(c.last_contact))}${c.client_version ? ` · client ${esc(c.client_version)}` : ""}${pkgNote(c) ? ` · <span class="warn-text">${esc(pkgNote(c))}</span>` : ""}</span>
         </button>
@@ -425,6 +462,36 @@ function clientGroups(clients, jobs, sizes) {
       <div class="cgbody" id="${esc(id)}" ${open ? "" : "hidden"}>
         ${s.jobs.length ? jobLedger(s.jobs, sizes, {noClient: true})
           : `<div class="cgempty"><span class="muted">No backup jobs yet.</span> <a href="#/jobs/new/${esc(c.id)}">Create a backup job</a></div>`}
+      </div>
+    </section>`;
+  }).join("");
+}
+
+// tagGroups is clientGroups by tag: a section per tag, holding each tagged
+// client and its jobs. A client with two tags is in both.
+function tagGroups(clients, jobs, sizes) {
+  const saved = groupState(), buckets = tagBuckets(clients);
+  return buckets.map(({tag, clients: list}, i) => {
+    const sums = list.map(c => [c, clientSummary(c, jobs)]);
+    const n = k => sums.reduce((a, [, s]) => a + s[k], 0);
+    const nJobs = sums.reduce((a, [, s]) => a + s.jobs.length, 0);
+    const trouble = sums.some(([, s]) => s.trouble), key = "tag:" + tag;
+    const open = trouble || buckets.length === 1 || saved[key] === true;
+    const counts = [plural(list.length, "client"), plural(nJobs, "job"), n("running") && `${n("running")} running`, n("failing") && `${n("failing")} failing`, n("disabled") && `${n("disabled")} disabled`].filter(Boolean);
+    const id = "tg-" + i;
+    return `<section class="cgroup ${trouble ? "trouble" : ""}">
+      <div class="cghead">
+        <button type="button" class="cgtoggle" aria-expanded="${open}" aria-controls="${id}" data-group="${esc(key)}" ${trouble || buckets.length === 1 ? 'data-pinned="1"' : ""}>
+          <span class="chev" aria-hidden="true"></span>
+          <span class="cgname"><b>${tag ? esc(tag) : "No tag"}</b></span>
+          <span class="cgcounts">${counts.map(x => `<span class="${/failing/.test(x) ? "bad-text" : /running/.test(x) ? "busy-text" : ""}">${esc(x)}</span>`).join(" · ")}</span>
+        </button>
+      </div>
+      <div class="cgbody" id="${id}" ${open ? "" : "hidden"}>
+        ${sums.map(([c, s]) => `<div class="cgclient"><a class="jobname" href="#/clients/${esc(c.id)}">${esc(c.name)}</a>${clientPill(c.status)}
+            <span class="sub">${esc(plural(s.jobs.length, "job"))} · ${esc(ago(c.last_contact))}</span></div>
+          ${s.jobs.length ? jobLedger(s.jobs, sizes, {noClient: true})
+            : `<div class="cgempty"><span class="muted">No backup jobs yet.</span> <a href="#/jobs/new/${esc(c.id)}">Create a backup job</a></div>`}`).join("")}
       </div>
     </section>`;
   }).join("");
@@ -595,18 +662,32 @@ function bindRunButtons(refresh) {
 }
 
 async function viewJobs(token) {
-  const [{jobs}, {clients}, {destinations}, {sizes}] = await Promise.all([api("GET", "/jobs"), api("GET", "/clients"), api("GET", "/destinations"), api("GET", "/sizes")]);
+  let [{jobs}, {clients}, {destinations}, {sizes}] = await Promise.all([api("GET", "/jobs"), api("GET", "/clients"), api("GET", "/destinations"), api("GET", "/sizes")]);
   if (token !== routeToken) return;
   const missing = !clients.length ? ["a client", "#/clients/new", "Add a client"] : !destinations.length ? ["a destination", "#/destinations/new", "Add a destination"] : null;
+  const refresh = async () => { if (token === routeToken) route(); };
+  // body is the list in the chosen grouping: one list, by client, or by tag.
+  const body = () => {
+    const tags = hasTags(clients);
+    let mode = groupBy("jobs", "none");
+    if (mode === "tag" && !tags) mode = "none";
+    const picker = clients.length > 1 || tags ? groupByPicker("jobs", mode, [["none", "Nothing"], ["client", "Client"], ...(tags ? [["tag", "Tag"]] : [])]) : "";
+    const list = mode === "client" ? `<div class="cgroups">${clientGroups(clients, jobs, sizes)}</div>`
+      : mode === "tag" ? `<div class="cgroups">${tagGroups(clients, jobs, sizes)}</div>` : jobLedger(jobs, sizes);
+    return `${picker ? `<div class="pagehead m-0 mb-14"><span></span><div class="btnrow">${picker}</div></div>` : ""}${list}`;
+  };
+  const bind = () => { bindRunButtons(refresh); bindClientGroups(redraw); bindGroupBy(redraw); };
+  const redraw = () => { const el = $("#jobs-body"); if (el) { el.innerHTML = body(); bind(); } };
   render(`<div class="pagehead"><div><h1>Backup jobs</h1><p class="lede">Each job backs up folders on one client to one or more destinations, on its own schedule.</p></div>
     ${missing ? "" : `<a class="btn primary" href="#/jobs/new">Create a backup job</a>`}</div>
-    ${jobs.length ? jobLedger(jobs, sizes) : `<div class="panel empty"><h2>No jobs yet</h2><p>${missing ? `Add ${missing[0]} first, so jobs have something to back up${missing[0] === "a client" ? "" : " to"}.` : "Create a job to choose folders and a schedule."}</p>
+    ${jobs.length ? `<div id="jobs-body">${body()}</div>` : `<div class="panel empty"><h2>No jobs yet</h2><p>${missing ? `Add ${missing[0]} first, so jobs have something to back up${missing[0] === "a client" ? "" : " to"}.` : "Create a job to choose folders and a schedule."}</p>
       <a class="btn primary" href="${missing ? missing[1] : "#/jobs/new"}">${missing ? missing[2] : "Create a backup job"}</a></div>`}`);
-  const refresh = async () => { if (token === routeToken) route(); };
-  bindRunButtons(refresh);
+  bind();
   poll(async () => {
-    const [d, z] = await Promise.all([api("GET", "/jobs"), api("GET", "/sizes")]);
-    if (token === routeToken && $(".ledger")) { $(".ledger").outerHTML = jobLedger(d.jobs, z.sizes); bindRunButtons(refresh); }
+    const [d, z, cl] = await Promise.all([api("GET", "/jobs"), api("GET", "/sizes"), api("GET", "/clients")]);
+    if (token !== routeToken) return;
+    jobs = d.jobs; sizes = z.sizes; clients = cl.clients;
+    redraw();
   }, 8000);
 }
 
@@ -1115,7 +1196,7 @@ function clientsTable(clients) {
   return `<div class="panel tablewrap"><table>
     <thead><tr><th>Client</th><th>Status</th><th>System</th><th>Backup client</th><th>Last contact</th></tr></thead>
     <tbody>${clients.map(c => `<tr class="clickable" data-href="#/clients/${esc(c.id)}">
-      <td><a class="jobname" href="#/clients/${esc(c.id)}">${esc(c.name)}</a><div class="sub mono">${esc(c.address)}${c.port === 22 ? "" : ":" + esc(c.port)}</div></td>
+      <td><a class="jobname" href="#/clients/${esc(c.id)}">${esc(c.name)}</a><div class="sub mono">${esc(c.address)}${c.port === 22 ? "" : ":" + esc(c.port)}</div>${tagPills(c) ? `<div class="mt-4">${tagPills(c)}</div>` : ""}</td>
       <td>${clientPill(c.status)}</td>
       <td class="small">${esc(c.os_pretty || "—")}${c.arch ? `<div class="sub">${esc(c.arch)}</div>` : ""}</td>
       <td class="small">${c.client_version ? esc(c.client_version) : "—"}${pkgCanUpdate(c) ? `<div class="sub">${pkgUpdateLink(c)}</div>` : pkgNote(c) ? `<div class="sub warn-text">${esc(pkgNote(c))}</div>` : ""}</td>
@@ -1125,10 +1206,13 @@ function clientsTable(clients) {
 async function viewClients(token) {
   const {clients} = await api("GET", "/clients");
   if (token !== routeToken) return;
+  const byTag = hasTags(clients) && groupBy("clients", "none") === "tag";
+  const list = byTag ? tagBuckets(clients).map(b => `<h2 class="mt-16">${b.tag ? esc(b.tag) : "No tag"}</h2>${clientsTable(b.clients)}`).join("") : clientsTable(clients);
   render(`<div class="pagehead"><div><h1>Clients</h1><p class="lede">The machines this server manages. Each one keeps its own backup schedule, so it carries on if this server is down.</p></div>
-    <a class="btn primary" href="#/clients/new">Add a client</a></div>
-    ${clients.length ? clientsTable(clients) : `<div class="panel empty"><h2>No clients yet</h2><p>Add a Linux machine you can reach over SSH from this server, on your network or over a VPN.</p><a class="btn primary" href="#/clients/new">Add a client</a></div>`}`);
+    <div class="btnrow">${hasTags(clients) ? groupByPicker("clients", byTag ? "tag" : "none", [["none", "Nothing"], ["tag", "Tag"]]) : ""}<a class="btn primary" href="#/clients/new">Add a client</a></div></div>
+    ${clients.length ? list : `<div class="panel empty"><h2>No clients yet</h2><p>Add a Linux machine you can reach over SSH from this server, on your network or over a VPN.</p><a class="btn primary" href="#/clients/new">Add a client</a></div>`}`);
   bindRowLinks();
+  bindGroupBy(() => route());
   bindPkgUpdates(clients);
 }
 
@@ -1254,6 +1338,37 @@ async function viewClientNew(token) {
   step1();
 }
 
+// tagEditor shows a client's tags with a remove button each, and a box to
+// add one (suggesting tags other clients have). Each change is saved at once.
+function tagEditor(box, c, clients) {
+  let tags = [...(c.tags || [])];
+  const known = [...new Set(clients.flatMap(x => x.tags || []))].sort((a, b) => a.localeCompare(b));
+  const save = async next => {
+    $$("button, input", box).forEach(e => { e.disabled = true; });
+    try {
+      const r = await api("PUT", `/clients/${c.id}/tags`, {tags: next});
+      tags = r.client.tags;
+    } catch (ex) { toast(ex.message, "bad"); }
+    draw();
+  };
+  const draw = () => {
+    const suggest = known.filter(t => !tags.some(x => x.toLowerCase() === t.toLowerCase()));
+    box.innerHTML = `${tags.length ? `<div class="tags tagedit">${tags.map((t, i) => `<span class="tag">${esc(t)}<button type="button" data-untag="${i}" aria-label="Remove the tag ${esc(t)}" title="Remove">×</button></span>`).join("")}</div>` : `<p class="muted m-0">No tags yet.</p>`}
+      <form class="tagadd mt-12" novalidate><input type="text" name="tag" maxlength="32" autocomplete="off" list="c-tag-list" placeholder="Add a tag" aria-label="Add a tag">
+        <datalist id="c-tag-list">${suggest.map(t => `<option value="${esc(t)}">`).join("")}</datalist>
+        <button class="btn small" type="submit">Add</button></form>`;
+    $$("[data-untag]", box).forEach(b => b.addEventListener("click", () => save(tags.filter((_, i) => i !== +b.dataset.untag))));
+    const f = $("form", box);
+    f.addEventListener("submit", e => {
+      e.preventDefault();
+      // Commas separate several tags typed at once.
+      const add = f.tag.value.split(",").map(t => t.trim()).filter(Boolean);
+      if (add.length) save([...tags, ...add]);
+    });
+  };
+  draw();
+}
+
 async function viewClient(id, token) {
   const [{client: c, task}, ssh] = await Promise.all([api("GET", `/clients/${id}`), api("GET", "/settings/ssh")]);
   if (token !== routeToken) return;
@@ -1266,7 +1381,7 @@ async function viewClient(id, token) {
   }[c.status] || "";
   const pending = c.settings_pending ? `<div class="banner warn"><b>${esc(c.name)} doesn't have the latest job settings yet.</b> ${c.apply_error ? esc(c.apply_error) + ". " : ""}They're sent automatically when it can be reached.
     <div class="btnrow"><button class="btn small" id="c-apply">Send them now</button></div></div>` : "";
-  const {jobs} = await api("GET", `/jobs?client=${id}`);
+  const [{jobs}, all] = await Promise.all([api("GET", `/jobs?client=${id}`), api("GET", "/clients")]);
   if (token !== routeToken) return;
   render(`<a class="back" href="#/clients">‹ Clients</a>
     <div class="pagehead"><div><h1>${esc(c.name)} ${clientPill(c.status)}</h1><p class="lede">${esc(c.os_pretty || c.address)}</p></div>
@@ -1274,6 +1389,8 @@ async function viewClient(id, token) {
     ${banner}${pending}
     <div class="cols"><div class="stack">
       <div class="panel" id="c-task" ${task && !task.done ? "" : "hidden"}><h2>Setup</h2></div>
+      <div class="panel"><h2>Tags</h2><p class="hint m-0 mb-14">Tags group clients and their backup jobs on the Dashboard and the Backup jobs page, such as “home”, “offsite” or “Raspberry Pi”.</p>
+        <div id="c-tags"></div></div>
       <div class="panel"><div class="pagehead m-0"><h2 class="m-0">Backup jobs</h2><a class="btn small" href="#/jobs/new/${esc(id)}">Add a backup job</a></div>
         ${jobs.length ? `<ul class="steps mt-12">${jobs.map(j => `<li><a class="jobname" href="#/jobs/${esc(j.id)}">${esc(j.name)}</a> <span class="sub">${esc(schedText(j.schedule))}${j.enabled ? "" : ", disabled"}</span>${(() => { const cur = (j.recent || []).find(r => r.status === "running"); return cur ? `<div class="state running"><b>Running now</b>${progressHtml(cur)}</div>` : ""; })()}</li>`).join("")}</ul>` : `<p class="muted mt-12">No jobs for this client yet.</p>`}</div>
       <div class="panel"><h2>Repair</h2><p class="hint m-0 mb-14">Runs setup again as root: reinstalls pbcm-runner, the pbcm account and its sudo rule, and the backup client if it's missing. Use it after reinstalling the client, if its host key changed, or if something was removed by hand.</p>
@@ -1309,6 +1426,7 @@ async function viewClient(id, token) {
     } catch (ex) { toast(ex.message, "bad"); e.target.disabled = false; }
   };
   $("#c-browse").onclick = () => pickFolder(id, "/", false);
+  tagEditor($("#c-tags"), c, all.clients);
   bindPkgUpdates([c]);
   if ($("#c-apply")) $("#c-apply").onclick = async e => {
     e.target.disabled = true;
@@ -1751,6 +1869,7 @@ function startImport(box, file, fileName, clients, token) {
         <small>1.x backed up one machine. Add it as a client first if it isn't listed.</small></label>` : ""}
       ${p.destinations.length ? `<h4 class="mt-16">Destinations</h4><ul class="implist">${destRows}</ul>` : ""}
       ${p.jobs.length ? `<h4 class="mt-16">Backup jobs</h4><ul class="implist">${jobRows}</ul>` : `<p class="muted">No backup jobs in this file.</p>`}
+      ${(p.client_tags || []).length ? `<h4 class="mt-16">Client tags</h4><ul class="implist">${p.client_tags.map(x => `<li><b>${esc(x.client)}</b> <span class="tags">${x.tags.map(t => `<span class="tag">${esc(t)}</span>`).join("")}</span></li>`).join("")}</ul><p class="sub">For clients here that have no tags yet.</p>` : ""}
       <div class="choice">
         ${p.alerts ? `<label class="check"><input type="checkbox" name="import_alerts" ${opts.import_alerts ? "checked" : ""}><span><b>Import email alert settings</b><br><span class="hint">Mail server ${esc(p.alerts.host || "—")}, sending to ${esc(p.alerts.to || "—")}. Replaces the current alert settings.</span></span></label>
           ${p.alerts.password_needed && opts.import_alerts ? `<label class="field"><span>Mail server password</span><input type="password" name="alert_password" autocomplete="off" value="${esc(opts.alert_password)}"><small>Not in the file. Leave blank to enter it later on the Alerts page.</small></label>` : ""}` : ""}

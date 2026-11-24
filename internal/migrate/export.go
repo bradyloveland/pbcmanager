@@ -37,10 +37,11 @@ type ExportDest struct {
 // ExportClient identifies a client; it has to be added again on the new
 // server (over SSH) before its jobs can be imported.
 type ExportClient struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Address string `json:"address"`
-	Port    int    `json:"port"`
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Address string   `json:"address"`
+	Port    int      `json:"port"`
+	Tags    []string `json:"tags,omitempty"`
 }
 
 // ExportJob is a job without its key file password.
@@ -73,7 +74,7 @@ func BuildExport(st *store.Store, settings map[string]any, a alerts.Settings, se
 		return nil, err
 	}
 	for _, c := range clients {
-		e.Clients = append(e.Clients, ExportClient{ID: c.ID, Name: c.Name, Address: c.Address, Port: c.Port})
+		e.Clients = append(e.Clients, ExportClient{ID: c.ID, Name: c.Name, Address: c.Address, Port: c.Port, Tags: c.Tags})
 	}
 	jobs, err := st.ListJobs("")
 	if err != nil {
@@ -103,7 +104,7 @@ func parseExport(raw []byte) (*Source, error) {
 		src.Dests = append(src.Dests, SrcDest{Key: keyOr(d.ID, "d", i), Input: in})
 	}
 	for _, c := range e.Clients {
-		src.Clients = append(src.Clients, SrcClient{Key: c.ID, Name: c.Name, Address: c.Address, Port: c.Port})
+		src.Clients = append(src.Clients, SrcClient{Key: c.ID, Name: c.Name, Address: c.Address, Port: c.Port, Tags: c.Tags})
 	}
 	for i, j := range e.Jobs {
 		in := j.JobInput

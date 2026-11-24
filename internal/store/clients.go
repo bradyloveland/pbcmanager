@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -48,6 +49,8 @@ type Client struct {
 	Timezone string `json:"timezone"`
 	// UnreachableSince is when the server lost contact (0 = reachable).
 	UnreachableSince int64 `json:"unreachable_since"`
+	// Tags group clients in the UI. Changed only with SetClientTags.
+	Tags []string `json:"tags"`
 }
 
 // ErrNotFound means the record doesn't exist.
@@ -60,18 +63,22 @@ func (e *ErrDuplicate) Error() string { return "duplicate " + e.Field }
 
 const clientCols = `id, name, address, port, host_key, status, status_detail, offered_key, os_id, os_pretty,
 	os_codename, arch, hostname, systemd_version, client_version, runner_version, server_here, last_contact, created_at,
-	applied_hash, apply_error, run_cursor, timezone, unreachable_since`
+	applied_hash, apply_error, run_cursor, timezone, unreachable_since, tags`
 
 func scanClient(row interface{ Scan(...any) error }) (*Client, error) {
 	var c Client
 	var here int
+	var tags string
 	err := row.Scan(&c.ID, &c.Name, &c.Address, &c.Port, &c.HostKey, &c.Status, &c.StatusDetail, &c.OfferedKey,
 		&c.OSID, &c.OSPretty, &c.OSCodename, &c.Arch, &c.Hostname, &c.SystemdVersion, &c.ClientVersion,
-		&c.RunnerVersion, &here, &c.LastContact, &c.CreatedAt, &c.AppliedHash, &c.ApplyError, &c.RunCursor, &c.Timezone, &c.UnreachableSince)
+		&c.RunnerVersion, &here, &c.LastContact, &c.CreatedAt, &c.AppliedHash, &c.ApplyError, &c.RunCursor, &c.Timezone, &c.UnreachableSince, &tags)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	c.ServerHere = here != 0
+	if json.Unmarshal([]byte(tags), &c.Tags) != nil || c.Tags == nil {
+		c.Tags = []string{}
+	}
 	return &c, err
 }
 
@@ -92,11 +99,31 @@ func dupError(err error) error {
 // CreateClient inserts a client.
 func (s *Store) CreateClient(c *Client) error {
 	c.CreatedAt = s.Now().Unix()
-	_, err := s.db.Exec(`INSERT INTO clients (`+clientCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	if c.Tags == nil {
+		c.Tags = []string{}
+	}
+	tags, _ := json.Marshal(c.Tags)
+	_, err := s.db.Exec(`INSERT INTO clients (`+clientCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		c.ID, c.Name, c.Address, c.Port, c.HostKey, c.Status, c.StatusDetail, c.OfferedKey, c.OSID, c.OSPretty,
 		c.OSCodename, c.Arch, c.Hostname, c.SystemdVersion, c.ClientVersion, c.RunnerVersion, boolInt(c.ServerHere),
-		c.LastContact, c.CreatedAt, c.AppliedHash, c.ApplyError, c.RunCursor, c.Timezone, c.UnreachableSince)
+		c.LastContact, c.CreatedAt, c.AppliedHash, c.ApplyError, c.RunCursor, c.Timezone, c.UnreachableSince, string(tags))
 	return dupError(err)
+}
+
+// SetClientTags replaces a client's tags.
+func (s *Store) SetClientTags(id string, tags []string) error {
+	if tags == nil {
+		tags = []string{}
+	}
+	raw, _ := json.Marshal(tags)
+	res, err := s.db.Exec(`UPDATE clients SET tags=? WHERE id=?`, string(raw), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // SaveClient updates every field of a client.

@@ -26,6 +26,16 @@ The server never signs in as root again.
 
 If the client only lets certain groups sign in over SSH, as OpenMediaVault does with `AllowGroups root _ssh`, setup adds `pbcm` to an allowed group. It never chooses one that grants admin rights. If it's limited by user (`AllowUsers`) instead, setup doesn't edit your SSH settings; its log says which line to change.
 
+## Tags
+
+Tags group clients and their backup jobs, which helps when several clients have jobs with the same name, such as `etc` on every machine. Add them under **Tags** on a client's page: type a tag and press **Add**, or several separated by commas. Tags already used on other clients are suggested. Remove one with its **×**.
+
+- A client can have up to 10 tags, each up to 32 characters, without commas.
+- Tags ignore case: typing `Home` when another client has `home` uses `home`, so the same tag never makes two groups.
+- Once any client has a tag, **Group by** appears on the Dashboard (**Client** or **Tag**), the Backup jobs page (**Nothing**, **Client** or **Tag**) and the Clients list (**Nothing** or **Tag**). Each page remembers its choice in your browser.
+- Grouped by tag, each tag gets a section with its clients and their jobs. A client with two tags is in both sections, and clients without a tag are under **No tag** at the end.
+- Settings exports include tags. Importing one gives them to a matching client here that has no tags yet; tags already set here aren't changed.
+
 ## While the server is down
 
 Each client has its own copy of its jobs, as systemd timers, and the credentials it needs, encrypted with `systemd-creds` where available. Backups keep running on schedule. When the server is back, it collects the results it missed, including their logs, and reports failures.
